@@ -17,6 +17,16 @@ export default {
       fontFamily: {
         sans: ['Inter', 'Roboto', 'sans-serif'],
       },
+      animation: {
+        'spin-slow': 'spin 4s linear infinite',
+        'marquee': 'marquee 10s linear infinite',
+      },
+      keyframes: {
+        marquee: {
+          '0%': { transform: 'translateX(0%)' },
+          '100%': { transform: 'translateX(-50%)' },
+        }
+      }
     },
   },
   plugins: [],

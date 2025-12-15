@@ -8,8 +8,11 @@ const store = useEventStore()
 <template>
   <div class="h-screen bg-black text-white relative overflow-hidden">
     <!-- Header (Floating) -->
-    <div class="absolute top-0 w-full z-20 p-4 bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
-      <h1 class="text-primary font-extrabold text-2xl drop-shadow-lg tracking-tight">The Place to BEER 🍺</h1>
+    <!-- Header (TikTok Style Tabs) -->
+    <div class="absolute top-0 w-full z-20 pt-14 pb-10 bg-gradient-to-b from-black/80 to-transparent flex justify-center items-center gap-6 text-white font-bold drop-shadow-md pointer-events-auto">
+       <button class="text-white/60 text-lg font-medium hover:text-white transition">Autour de moi</button>
+       <div class="h-4 w-[1px] bg-white/20"></div>
+       <button class="text-white text-xl font-bold border-b-2 border-primary pb-0.5 shadow-lg">À la une 🔥</button>
     </div>
 
     <!-- Vertical Feed -->
@@ -21,7 +24,8 @@ const store = useEventStore()
         <!-- Background Image/Video -->
         <!-- Added transition for image loading feel -->
         <div class="absolute inset-0 bg-gray-900">
-           <img :src="event.image" alt="Event Cover" class="w-full h-full object-cover opacity-90" />
+           <video v-if="event.type === 'video'" :src="event.video" autoplay loop muted playsinline class="w-full h-full object-cover opacity-100"></video>
+           <img v-else :src="event.image" alt="Event Cover" class="w-full h-full object-cover opacity-90" />
            <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/90"></div>
         </div>
         
@@ -55,12 +59,21 @@ const store = useEventStore()
              </div>
              <span class="text-xs font-semibold drop-shadow-md">Partager</span>
            </button>
+
+           <!-- Spinning Disc (TikTok Vibe) -->
+           <div class="mt-4 relative">
+              <div class="w-12 h-12 rounded-full bg-black border-[3px] border-dark-lighter flex items-center justify-center animate-spin-slow overflow-hidden">
+                 <img :src="event.image" class="w-full h-full object-cover opacity-80" />
+              </div>
+              <!-- Floating Notes Animation would go here -->
+           </div>
         </div>
 
         <!-- Content Overlay (Bottom Left) -->
-        <div class="relative z-10 w-full pl-4 pr-16 pb-8 flex flex-col items-start space-y-2">
+        <!-- mb-16 to clear the bottom navigation -->
+        <div class="relative z-10 w-full pl-4 pr-16 pb-4 mb-16 flex flex-col items-start space-y-2 pointer-events-none">
           <!-- Promo Label -->
-          <div v-if="event.id" class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left">
+          <div class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
             🔥 2 achetées = 1 offerte
           </div>
 
@@ -74,18 +87,55 @@ const store = useEventStore()
           </div>
           
           <!-- Collapsed Description (TikTok style) -->
-          <p class="text-gray-200 text-sm line-clamp-2 w-[85%] leading-relaxed opacity-90">
+          <p class="text-gray-200 text-sm line-clamp-2 w-[85%] leading-relaxed opacity-90 mb-2">
             Ce soir grosse ambiance avec DJ Mombassa. Venez tôt pour les places assises ! #Rumba #Kinshasa
           </p>
+
+          <!-- Music Ticker -->
+          <div class="flex items-center gap-2 w-[70%] overflow-hidden">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 fill-white animate-pulse" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+              <div class="whitespace-nowrap animate-marquee text-xs font-medium">
+                  <span class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
+                  <span class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
+                  <span class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
+              </div>
+          </div>
         </div>
 
       </div>
     </div>
     
-    <!-- Pro Button (Still accessible but cleaner) -->
-    <router-link to="/pro" class="fixed top-4 right-4 bg-white/10 backdrop-blur-md text-white/80 p-2 rounded-full z-50">
-       <span class="text-xs font-bold px-2">PRO</span>
-    </router-link>
+    <!-- Bottom Navigation Bar -->
+    <div class="fixed bottom-0 w-full z-30 bg-black text-white flex justify-around items-center h-16 border-t border-white/10 safe-area-bottom">
+        <button class="flex flex-col items-center gap-1 opacity-100">
+           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 fill-white" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+           <span class="text-[10px] font-bold">Acceuil</span>
+        </button>
+        
+        <button class="flex flex-col items-center gap-1 opacity-50">
+           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 stroke-white stroke-2 fill-none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+           <span class="text-[10px] font-bold">Découvrir</span>
+        </button>
+
+        <!-- Center Add Button (TikTok Style) -->
+        <router-link to="/pro/create" class="relative group">
+            <div class="absolute left-0 top-1/2 -translate-y-1/2 w-10 h-8 bg-[#00f2ea] rounded-lg transition group-active:translate-x-1"></div>
+            <div class="absolute right-0 top-1/2 -translate-y-1/2 w-10 h-8 bg-[#ff0050] rounded-lg transition group-active:-translate-x-1"></div>
+            <div class="relative w-10 h-8 bg-white rounded-lg flex items-center justify-center z-10 transition group-active:scale-95">
+                <span class="text-black font-bold text-xl leading-none">+</span>
+            </div>
+        </router-link>
+
+        <button class="flex flex-col items-center gap-1 opacity-50">
+           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 stroke-white stroke-2 fill-none" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+           <span class="text-[10px] font-bold">Boîte de réception</span>
+        </button>
+
+        <router-link to="/pro" class="flex flex-col items-center gap-1 opacity-50">
+           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 stroke-white stroke-2 fill-none" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+           <span class="text-[10px] font-bold">Moi</span>
+        </router-link>
+    </div>
   </div>
 </template>
 
