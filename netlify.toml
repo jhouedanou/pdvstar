@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[context.production.environment]
+  VITE_GREEN_API_URL = "https://7105.api.greenapi.com"
+  VITE_GREEN_MEDIA_URL = "https://7105.media.greenapi.com"
+  VITE_GREEN_ID_INSTANCE = "7105319958"
+  # VITE_GREEN_API_TOKEN should be set in Netlify environment variables

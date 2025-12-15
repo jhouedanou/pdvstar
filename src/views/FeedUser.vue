@@ -1,8 +1,61 @@
 <script setup>
+import { ref, computed, onMounted } from 'vue'
 import { useEventStore } from '../stores/eventStore'
-import { Heart, MapPin, Share2 } from 'lucide-vue-next'
+import { useUserStore } from '../stores/userStore'
+import { Heart, MapPin, Share2, Loader } from 'lucide-vue-next'
+import UserProfileModal from '../components/UserProfileModal.vue'
+import { sendWhatsAppMessage, formatEventNotificationMessage } from '../services/greenApiService'
 
-const store = useEventStore()
+const eventStore = useEventStore()
+const userStore = useUserStore()
+
+const showProfileModal = ref(false)
+const sendingMessage = ref(false)
+const messageError = ref('')
+const messageSuccess = ref('')
+
+onMounted(() => {
+    // Show profile modal if user doesn't have a profile
+    if (!userStore.isProfileComplete) {
+        showProfileModal.value = true
+    }
+})
+
+const handleProfileCreated = () => {
+    showProfileModal.value = false
+}
+
+const handleJyVais = async (event) => {
+    if (!userStore.user) {
+        showProfileModal.value = true
+        return
+    }
+
+    sendingMessage.value = true
+    messageError.value = ''
+    messageSuccess.value = ''
+
+    try {
+        const message = formatEventNotificationMessage(
+            event,
+            userStore.user.name,
+            userStore.user.phone
+        )
+
+        await sendWhatsAppMessage(userStore.user.phone, message)
+        messageSuccess.value = `Message envoyé pour "${event.title}"!`
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => {
+            messageSuccess.value = ''
+        }, 3000)
+    } catch (error) {
+        console.error('Error sending WhatsApp message:', error)
+        messageError.value = error.message || 'Erreur lors de l\'envoi du message'
+    } finally {
+        sendingMessage.value = false
+    }
+}
 </script>
 
 <template>
@@ -18,7 +71,7 @@ const store = useEventStore()
     <!-- Vertical Feed -->
     <!-- Added scrollbar-hide via custom style or class if available, using inline style for safety here -->
     <div class="snap-y snap-mandatory h-full w-full overflow-y-scroll scroll-smooth no-scrollbar">
-      <div v-for="event in store.events" :key="event.id" 
+      <div v-for="event in eventStore.events" :key="event.id" 
            class="snap-start h-full w-full relative bg-dark-lighter flex items-end">
         
         <!-- Background Image/Video -->
@@ -41,8 +94,14 @@ const store = useEventStore()
              </div>
            </div>
 
-           <button class="flex flex-col items-center gap-1 group">
-             <Heart class="w-9 h-9 text-white group-active:scale-75 transition-transform duration-200 fill-white/10 hover:fill-red-500 hover:text-red-500"/>
+           <button 
+             @click="handleJyVais(event)"
+             :disabled="sendingMessage"
+             class="flex flex-col items-center gap-1 group disabled:opacity-50 disabled:cursor-not-allowed">
+             <div class="relative">
+               <Heart class="w-9 h-9 text-white group-active:scale-75 transition-transform duration-200 fill-white/10 hover:fill-red-500 hover:text-red-500"/>
+               <Loader v-if="sendingMessage" class="absolute inset-0 w-9 h-9 animate-spin text-primary" />
+             </div>
              <span class="text-xs font-semibold drop-shadow-md">J'y vais</span>
            </button>
            
@@ -88,7 +147,7 @@ const store = useEventStore()
           
           <!-- Collapsed Description (TikTok style) -->
           <p class="text-gray-200 text-sm line-clamp-2 w-[85%] leading-relaxed opacity-90 mb-2">
-            Ce soir grosse ambiance avec DJ Mombassa. Venez tôt pour les places assises ! #Rumba #Kinshasa
+            {{ event.description || 'Découvrez cet événement incontournable!' }}
           </p>
 
           <!-- Music Ticker -->
@@ -131,11 +190,30 @@ const store = useEventStore()
            <span class="text-[10px] font-bold">Boîte de réception</span>
         </button>
 
-        <router-link to="/pro" class="flex flex-col items-center gap-1 opacity-50">
-           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 stroke-white stroke-2 fill-none" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-           <span class="text-[10px] font-bold">Moi</span>
+        <router-link to="/pro" class="flex flex-col items-center gap-1 opacity-100 hover:opacity-100 transition">
+           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 stroke-primary stroke-2 fill-none" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+           <span class="text-[10px] font-bold text-primary">Espace Pro</span>
         </router-link>
     </div>
+
+    <!-- User Profile Modal -->
+    <UserProfileModal v-if="showProfileModal" @profile-created="handleProfileCreated" />
+
+    <!-- Success Message Toast -->
+    <transition name="fade">
+      <div v-if="messageSuccess" class="fixed top-4 left-4 right-4 bg-green-600 text-white px-4 py-3 rounded-lg shadow-lg z-40 flex items-center gap-2">
+        <span>✓</span>
+        <span>{{ messageSuccess }}</span>
+      </div>
+    </transition>
+
+    <!-- Error Message Toast -->
+    <transition name="fade">
+      <div v-if="messageError" class="fixed top-4 left-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-40 flex items-center gap-2">
+        <span>✕</span>
+        <span>{{ messageError }}</span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -150,5 +228,13 @@ const store = useEventStore()
 }
 .text-shadow {
     text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+/* Toast animations */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>
