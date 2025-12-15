@@ -4,7 +4,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { Heart, MapPin, Share2, Loader } from 'lucide-vue-next'
 import UserProfileModal from '../components/UserProfileModal.vue'
-import { sendWhatsAppMessage, formatEventNotificationMessage } from '../services/greenApiService'
+import { sendEventNotification } from '../services/greenApiService'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -36,22 +36,27 @@ const handleJyVais = async (event) => {
     messageSuccess.value = ''
 
     try {
-        const message = formatEventNotificationMessage(
+        // Send notification to organizer and confirmation to user
+        await sendEventNotification(
             event,
             userStore.user.name,
             userStore.user.phone
         )
-
-        await sendWhatsAppMessage(userStore.user.phone, message)
-        messageSuccess.value = `Message envoyé pour "${event.title}"!`
         
-        // Clear success message after 3 seconds
+        messageSuccess.value = `✅ Inscription confirmée pour "${event.title}"! Vous recevrez un message de confirmation.`
+        
+        // Clear success message after 5 seconds
         setTimeout(() => {
             messageSuccess.value = ''
-        }, 3000)
+        }, 5000)
     } catch (error) {
         console.error('Error sending WhatsApp message:', error)
         messageError.value = error.message || 'Erreur lors de l\'envoi du message'
+        
+        // Clear error message after 5 seconds
+        setTimeout(() => {
+            messageError.value = ''
+        }, 5000)
     } finally {
         sendingMessage.value = false
     }

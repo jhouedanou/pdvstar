@@ -12,6 +12,20 @@ const getGreenApiConfig = () => {
 }
 
 /**
+ * Clean Ivorian phone number by removing leading 07 after country code
+ * Example: +22507XXXXXXXX becomes +225XXXXXXXX
+ * @param {string} phoneNumber - Phone number to clean
+ * @returns {string} Cleaned phone number
+ */
+const cleanIvorianPhoneNumber = (phoneNumber) => {
+    // If number starts with +22507, remove the 07
+    if (phoneNumber.startsWith('+22507')) {
+        return phoneNumber.replace('+22507', '+225')
+    }
+    return phoneNumber
+}
+
+/**
  * Send a WhatsApp message via GreenAPI
  * @param {string} phoneNumber - Recipient phone number (with country code, e.g., +22545029721)
  * @param {string} message - Message text to send
@@ -30,8 +44,11 @@ export const sendWhatsAppMessage = async (phoneNumber, message) => {
         throw new Error('Phone number must be in international format (e.g., +22545029721)')
     }
 
+    // Clean Ivorian phone numbers (remove 0 after +225)
+    const cleanedPhoneNumber = cleanIvorianPhoneNumber(phoneNumber)
+    
     // Remove '+' and any spaces from phone number for API
-    const cleanPhone = phoneNumber.replace(/[^\d]/g, '')
+    const cleanPhone = cleanedPhoneNumber.replace(/[^\d]/g, '')
 
     try {
         const endpoint = `${config.apiUrl}/waInstance${config.idInstance}/sendMessage/${config.apiToken}`
@@ -65,7 +82,47 @@ export const sendWhatsAppMessage = async (phoneNumber, message) => {
 }
 
 /**
- * Format event notification message
+ * Send event notification to organizer and user
+ * @param {Object} event - Event object
+ * @param {string} userName - User name
+ * @param {string} userPhone - User phone
+ * @returns {Promise<Object>} Result of both messages
+ */
+export const sendEventNotification = async (event, userName, userPhone) => {
+    const organizerMessage = `🎉 Nouvel inscrit pour l'événement "${event.title}"
+📍 Lieu: ${event.location}
+👤 Nom: ${userName}
+📱 Téléphone: ${userPhone}
+⏰ ${new Date().toLocaleString('fr-FR')}`
+
+    const userConfirmationMessage = `✅ Confirmation d'inscription
+
+🎉 Événement: "${event.title}"
+📍 Lieu: ${event.location}
+📅 Date: ${new Date(event.date).toLocaleDateString('fr-FR')}
+👤 Organisateur: ${event.organizer}
+
+Vous recevrez plus d'informations prochainement. À bientôt! 🎊`
+
+    try {
+        // Send to organizer (using user's phone as organizer for now)
+        const organizerResult = await sendWhatsAppMessage(userPhone, organizerMessage)
+        
+        // Send confirmation to user
+        const userResult = await sendWhatsAppMessage(userPhone, userConfirmationMessage)
+        
+        return {
+            success: true,
+            organizerMessage: organizerResult,
+            userMessage: userResult
+        }
+    } catch (error) {
+        throw error
+    }
+}
+
+/**
+ * Format event notification message (legacy function, kept for compatibility)
  * @param {Object} event - Event object
  * @param {string} userName - User name
  * @param {string} userPhone - User phone
