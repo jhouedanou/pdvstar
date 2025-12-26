@@ -17,9 +17,16 @@ const isLocating = ref(false) // State for geolocation loading
 const error = ref('')
 
 onMounted(async () => {
+    // 1. Check persistence first (User preference)
+    const savedPhone = localStorage.getItem('last_phone_input')
+    if (savedPhone) {
+        formData.value.phone = savedPhone
+        return // Skip IP detection if we have a saved number
+    }
+
+    // 2. Fallback to IP detection
     isLocating.value = true
     try {
-        // Attempt to get user's country code via IP
         const response = await fetch('https://ipapi.co/json/')
         const data = await response.json()
         
@@ -44,6 +51,9 @@ const handleSubmit = async () => {
         return
     }
 
+    // Persist number
+    localStorage.setItem('last_phone_input', formData.value.phone)
+
     isLoading.value = true
     try {
         // Mock simple auth - in production this would verify OTP
@@ -65,11 +75,11 @@ const handleSubmit = async () => {
 
 <template>
   <div class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-gray-800">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-gray-200 dark:border-gray-800 transition-colors duration-300">
       <!-- Header -->
       <div class="mb-6">
-        <h1 class="text-2xl font-bold text-white mb-2">Bienvenue sur pdvstar 🎉</h1>
-        <p class="text-gray-400 text-sm">Complétez votre profil pour commencer</p>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Bienvenue sur pdvstar 🎉</h1>
+        <p class="text-gray-500 dark:text-gray-400 text-sm">Complétez votre profil pour commencer</p>
       </div>
 
       <!-- Form -->
@@ -78,18 +88,18 @@ const handleSubmit = async () => {
         <!-- Phone Field -->
         <div>
           <div class="flex justify-between items-center mb-2">
-            <label class="block text-sm font-semibold text-gray-300">Numéro de Téléphone</label>
+            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300">Numéro de Téléphone</label>
             <span v-if="isLocating" class="text-xs text-primary animate-pulse flex items-center gap-1">
                 <MapPin class="w-3 h-3" /> Localisation...
             </span>
           </div>
           <div class="relative">
-            <Phone class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+            <Phone class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
             <input
               v-model="formData.phone"
               type="tel"
               placeholder="+2250700000000"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-4 text-white text-lg placeholder-gray-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition"
+              class="w-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-10 pr-4 py-4 text-gray-900 dark:text-white text-lg placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
             />
           </div>
           <p class="text-xs text-gray-500 mt-2">Nous vous enverrons un code de confirmation.</p>

@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon } from 'lucide-vue-next'
 import UserProfileModal from '../components/UserProfileModal.vue'
+import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
 import { sendEventNotification } from '../services/greenApiService'
 
@@ -25,6 +26,123 @@ onMounted(() => {
 const handleProfileCreated = () => {
     showProfileModal.value = false
 }
+
+// --- Modal States ---
+// We use a simple state machine: only one major overlay active at a time
+const showMap = ref(false)
+const showSearch = ref(false)
+const showProfile = ref(false)
+const selectedMapEvent = ref(null) // Event selected on map
+
+const activeTab = computed({
+    get: () => {
+        if (showMap.value) return 'map'
+        if (showSearch.value) return 'search'
+        if (showProfile.value) return 'profile'
+        return 'feed'
+    },
+    set: (val) => {
+        // Reset all
+        showMap.value = false
+        showSearch.value = false
+        showProfile.value = false
+        
+        if (val === 'map') showMap.value = true
+        if (val === 'search') showSearch.value = true
+        if (val === 'profile') showProfile.value = true
+    }
+})
+
+// --- Map Logic ---
+const mapContainer = ref(null)
+let mapInstance = null
+
+// Inject Leaflet CSS & Listeners
+onMounted(() => {
+    // Theme Init
+    if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        isDarkMode.value = true
+        document.documentElement.classList.add('dark')
+    } else {
+        isDarkMode.value = false
+        document.documentElement.classList.remove('dark')
+    }
+
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+
+    // Listen for Map Popup Clicks
+    document.addEventListener('map-event-click', (e) => {
+        const eventId = e.detail
+        const event = eventStore.events.find(ev => ev.id == eventId) // Loose equality for string/number match
+        if (event) {
+            selectedMapEvent.value = event
+        }
+    })
+})
+
+watch(showMap, async (isOpen) => {
+    if (isOpen) {
+        await nextTick()
+        initMap()
+    }
+})
+
+const initMap = () => {
+    if (mapInstance) return // Already initialized
+
+    // Center on Abidjan (Marcory)
+    mapInstance = L.map(mapContainer.value).setView([5.30966, -3.97449], 14)
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20
+    }).addTo(mapInstance)
+
+    // Add Markers from Store
+    eventStore.events.forEach(event => {
+        if (event.coords) {
+            const marker = L.marker([event.coords.lat, event.coords.lng]).addTo(mapInstance)
+            
+            // Custom Popup
+            const popupContent = `
+                <div class="text-black text-center">
+                    <img src="${event.image}" style="width:100%; height:80px; object-fit:cover; border-radius:4px; margin-bottom:4px">
+                    <div style="font-weight:bold; font-size:12px">${event.title}</div>
+                    <div style="font-size:10px; color:gray">${event.distance}</div>
+                    <button onclick="document.dispatchEvent(new CustomEvent('map-event-click', {detail: '${event.id}'}))" style="background:#00f2ea; border:none; padding:4px 8px; border-radius:10px; font-size:10px; margin-top:4px; cursor:pointer">Voir</button>
+                </div>
+            `
+            marker.bindPopup(popupContent)
+        }
+    })
+}
+
+
+// --- Search Logic ---
+const searchQuery = ref('')
+const filteredEvents = computed(() => {
+    if (!searchQuery.value) return []
+    return eventStore.events.filter(e => 
+        e.title.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+        e.description.toLowerCase().includes(searchQuery.value.toLowerCase())
+    )
+})
+
+const handleSearchSelect = (event) => {
+    // Scroll to event or just show it (for MVP just close search)
+    activeTab.value = 'feed'
+    // In a real app we would scroll to the specific slide
+}
+
+// --- Profile Logic ---
+const myEvents = computed(() => {
+    return eventStore.events.filter(e => e.isRegistered)
+})
+
 
 const handleJyVais = async (event) => {
     if (!userStore.user) {
@@ -53,20 +171,40 @@ const openMap = (location) => {
     const query = encodeURIComponent(location)
     window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank')
 }
+
+// --- Theme Logic ---
+const isDarkMode = ref(true)
+const toggleTheme = () => {
+    isDarkMode.value = !isDarkMode.value
+    if (isDarkMode.value) {
+        document.documentElement.classList.add('dark')
+        localStorage.setItem('theme', 'dark')
+    } else {
+        document.documentElement.classList.remove('dark')
+        localStorage.setItem('theme', 'light')
+    }
+}
 </script>
 
 <template>
   <div class="responsive-container bg-black text-white relative overflow-hidden">
     <!-- Header (Floating) -->
-    <!-- Header (TikTok Style Tabs) -->
-    <div class="header-tabs absolute top-0 w-full z-20 pt-14 pb-10 bg-gradient-to-b from-black/80 to-transparent flex justify-center items-center gap-6 text-white font-bold drop-shadow-md pointer-events-auto">
-       <button class="text-white/60 text-lg font-medium hover:text-white transition">Autour de moi</button>
-       <div class="h-4 w-[1px] bg-white/20"></div>
-       <button class="text-white text-xl font-bold border-b-2 border-primary pb-0.5 shadow-lg">À la une 🔥</button>
+    <!-- Header (Standard TikTok Style) -->
+    <div class="header-tabs absolute top-0 w-full z-20 pt-14 pb-4 bg-gradient-to-b from-black/80 to-transparent flex justify-center items-center gap-6 text-white font-bold drop-shadow-md pointer-events-auto transition-all duration-300">
+       <div class="flex items-center gap-4">
+            <button 
+                @click="activeTab = 'map'"
+                class="text-white/80 hover:text-white transition transform active:scale-95 flex flex-col items-center">
+                <MapIcon class="w-6 h-6" />
+                <span class="text-[10px] font-normal">Carte</span>
+            </button>
+            <div class="text-white text-xl font-bold border-b-2 border-primary pb-0.5 shadow-lg">
+                À la une 🔥
+            </div>
+       </div>
     </div>
 
-    <!-- Vertical Feed -->
-    <!-- Added scrollbar-hide via custom style or class if available, using inline style for safety here -->
+    <!-- MAIN FEED VIEW -->
     <div class="feed-container snap-y snap-mandatory h-full w-full overflow-y-scroll scroll-smooth no-scrollbar">
       <div v-for="event in eventStore.events" :key="event.id" 
            class="event-slide snap-start h-full w-full relative bg-dark-lighter flex items-end">
@@ -164,20 +302,214 @@ const openMap = (location) => {
 
       </div>
     </div>
+
+    <!-- MAP MODAL (Full Screen Popup) -->
+    <transition name="fade">
+        <div v-if="showMap" class="fixed inset-0 bg-black z-50 flex flex-col">
+            <!-- Modal Header -->
+            <div class="absolute top-0 left-0 right-0 z-[1000] p-4 pt-12 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent pointer-events-none">
+                <h2 class="text-xl font-bold text-white pl-2 pointer-events-auto">Autour de moi 🌍</h2>
+                <button @click="showMap = false" class="bg-black/50 backdrop-blur-md p-2 rounded-full text-white pointer-events-auto hover:bg-white/20 transition">
+                    <X class="w-6 h-6" />
+                </button>
+            </div>
+
+            <!-- Map Container -->
+            <div ref="mapContainer" class="w-full h-full relative z-10"></div>
+            
+             <!-- Floating Info (Hide if event is selected) -->
+            <div v-if="!selectedMapEvent" class="absolute bottom-10 left-4 right-4 z-[500] bg-black/80 backdrop-blur-md p-3 rounded-xl border border-white/10 pointer-events-none">
+                <p class="text-white text-center text-xs">Déplacez-vous sur la carte pour voir les événements.</p>
+            </div>
+
+            <!-- EVENT DETAIL SIDEBAR (Bottom Sheet) -->
+            <transition name="up">
+                <div v-if="selectedMapEvent" class="absolute bottom-0 left-0 right-0 z-[600] bg-gray-900 rounded-t-3xl border-t border-gray-700 shadow-2xl max-h-[85vh] overflow-y-auto flex flex-col">
+                    
+                    <!-- Cover Image -->
+                    <div class="relative h-48 w-full shrink-0">
+                        <img :src="selectedMapEvent.image" class="w-full h-full object-cover">
+                        <button @click="selectedMapEvent = null" class="absolute top-4 right-4 bg-black/50 p-2 rounded-full text-white backdrop-blur-sm">
+                            <X class="w-5 h-5" />
+                        </button>
+                        <div class="absolute inset-0 bg-gradient-to-t from-gray-900 to-transparent"></div>
+                    </div>
+
+                    <!-- Content -->
+                    <div class="p-6 -mt-6 relative">
+                         <!-- Badge -->
+                        <span class="bg-primary text-black text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">
+                             {{ selectedMapEvent.type === 'video' ? 'Ambiance' : 'Événement' }}
+                        </span>
+
+                        <h2 class="text-2xl font-bold text-white mb-1 leading-tight">{{ selectedMapEvent.title }}</h2>
+                        <p class="text-gray-400 text-sm mb-4 flex items-center gap-1">
+                             <MapPin class="w-4 h-4 text-primary" /> 
+                             {{ selectedMapEvent.location }} ({{ selectedMapEvent.distance }})
+                        </p>
+
+                        <div class="flex items-center gap-4 mb-6 text-sm text-gray-300 bg-black/30 p-3 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <Calendar class="w-4 h-4 text-gray-400"/>
+                                <span>{{ new Date(selectedMapEvent.date).toLocaleDateString() }}</span>
+                            </div>
+                            <div class="w-[1px] h-4 bg-gray-600"></div>
+                            <div class="flex items-center gap-2">
+                                <UserCircle class="w-4 h-4 text-gray-400"/>
+                                <span>{{ selectedMapEvent.organizer }}</span>
+                            </div>
+                        </div>
+
+                        <p class="text-gray-300 text-sm leading-relaxed mb-8">
+                            {{ selectedMapEvent.description }}
+                        </p>
+
+                        <!-- COMMANDS / ACTIONS -->
+                        <div class="grid grid-cols-2 gap-3 safe-area-bottom pb-4">
+                            <button 
+                                @click="handleJyVais(selectedMapEvent)"
+                                class="flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition active:scale-95"
+                                :class="selectedMapEvent.isRegistered ? 'bg-green-600 text-white' : 'bg-primary text-black'"
+                            >
+                                <Heart class="w-5 h-5" :class="{'fill-white': selectedMapEvent.isRegistered}" />
+                                {{ selectedMapEvent.isRegistered ? 'Inscrit' : "J'y vais" }}
+                            </button>
+
+                            <button 
+                                @click="openMap(selectedMapEvent.location)"
+                                class="flex items-center justify-center gap-2 py-3 rounded-xl bg-gray-700 text-white font-bold hover:bg-gray-600 transition active:scale-95"
+                            >
+                                <MapIcon class="w-5 h-5" />
+                                Itinéraire
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+        </div>
+    </transition>
+
+    <!-- SEARCH MODAL -->
+    <transition name="fade">
+        <div v-if="showSearch" class="fixed inset-0 bg-gray-50 dark:bg-black/95 dark:backdrop-blur-xl z-50 flex flex-col pt-12 px-4 transition-colors duration-300">
+             <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-purple-500">Recherche</h2>
+                <button @click="showSearch = false" class="text-gray-900 dark:text-white p-2"><X class="w-7 h-7" /></button>
+            </div>
+
+            <div class="relative mb-6">
+                <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input 
+                    v-model="searchQuery" 
+                    type="text" 
+                    placeholder="Chercher un artiste, un lieu..." 
+                    class="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-transparent rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm"
+                    autofocus
+                >
+            </div>
+
+            <div class="flex-1 overflow-y-auto">
+                <div v-if="searchQuery && filteredEvents.length === 0" class="text-center text-gray-500 mt-10">
+                    Aucun résultat trouvé 😢
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 pb-20">
+                    <div v-for="event in (searchQuery ? filteredEvents : eventStore.events)" :key="event.id" 
+                         @click="handleSearchSelect(event)"
+                         class="bg-white dark:bg-gray-800 rounded-lg overflow-hidden active:scale-95 transition cursor-pointer shadow-md dark:shadow-none">
+                        <img :src="event.image" class="w-full h-32 object-cover">
+                        <div class="p-2">
+                            <h3 class="font-bold text-sm truncate text-gray-900 dark:text-white">{{ event.title }}</h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ event.date.split('T')[0] }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+    <!-- PROFILE MODAL (Calendar & Create) -->
+    <transition name="up">
+        <div v-if="showProfile" class="fixed inset-0 bg-gray-50 dark:bg-black z-50 flex flex-col pt-10 overflow-y-auto transition-colors duration-300">
+             <!-- Header -->
+             <div class="px-6 py-4 flex justify-between items-end border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-black/80 backdrop-blur-md sticky top-0 z-10 transition-colors duration-300">
+                <div>
+                    <h1 class="text-3xl font-black italic tracking-tighter text-gray-900 dark:text-white">MON PROFIL</h1>
+                    <p class="text-primary text-sm font-medium">{{ userStore.user?.name || 'Visiteur' }}</p>
+                </div>
+                <button @click="toggleTheme" class="bg-gray-200 dark:bg-gray-800 p-2 rounded-full text-black dark:text-white transition">
+                    <Moon v-if="!(isDarkMode)" class="w-6 h-6" />
+                    <Sun v-else class="w-6 h-6" />
+                </button>
+            </div>
+
+            <div class="p-6 pb-32">
+                 <!-- Create Action -->
+                 <div class="bg-gradient-to-r from-primary to-purple-600 rounded-2xl p-4 mb-8 text-black flex items-center justify-between shadow-lg shadow-primary/20 cursor-pointer hover:scale-[1.02] transition">
+                    <div>
+                        <h3 class="font-bold text-lg">Organiser un événement</h3>
+                        <p class="text-xs opacity-80">Devenir un créateur</p>
+                    </div>
+                    <div class="bg-black/20 p-2 rounded-full">
+                        <Plus class="w-6 h-6 text-black" />
+                    </div>
+                 </div>
+
+                 <!-- Calendar Section -->
+                 <div class="mb-4 flex items-center gap-2">
+                    <Calendar class="w-5 h-5 text-primary" />
+                    <h3 class="font-bold text-xl text-gray-900 dark:text-white">Mes Sorties ({{ myEvents.length }})</h3>
+                 </div>
+
+                 <div v-if="myEvents.length === 0" class="text-center py-10 bg-white dark:bg-gray-900 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 shadow-sm">
+                    <p class="text-gray-500 mb-2">Pas encore d'événements prévus.</p>
+                    <button @click="activeTab = 'feed'" class="text-primary text-sm font-bold underline">Explorer le feed</button>
+                 </div>
+
+                 <div v-else class="space-y-4">
+                    <div v-for="event in myEvents" :key="event.id" class="flex gap-4 bg-white dark:bg-gray-900 p-3 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm transition-colors duration-300">
+                        <div class="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-800 flex-shrink-0 overflow-hidden">
+                            <img :src="event.image" class="w-full h-full object-cover">
+                        </div>
+                        <div class="flex-1">
+                            <h4 class="font-bold text-gray-900 dark:text-white line-clamp-1">{{ event.title }}</h4>
+                            <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                <span>📅 {{ new Date(event.date).toLocaleDateString() }}</span>
+                                <span>📍 {{ event.location.split(',')[0] }}</span>
+                            </div>
+                            <span class="inline-block mt-2 text-[10px] bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full font-bold">Confirmé</span>
+                        </div>
+                    </div>
+                 </div>
+            </div>
+        </div>
+    </transition>
     
     <!-- Simple Bottom Navigation (Home, Recherche, Profil) -->
-    <div class="bottom-nav fixed bottom-0 w-full z-30 bg-black text-white flex justify-around items-center h-16 border-t border-white/10 safe-area-bottom">
-        <button class="flex flex-col items-center gap-1 opacity-100 text-primary">
+    <div class="bottom-nav fixed bottom-0 w-full z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around items-center h-16 border-t border-gray-200 dark:border-white/10 safe-area-bottom transition-colors duration-300">
+        <button 
+            @click="activeTab = 'feed'"
+            class="flex flex-col items-center gap-1 transition"
+            :class="!showSearch && !showProfile && !showMap ? 'opacity-100 text-primary scale-110' : 'opacity-40 hover:opacity-100'"
+        >
            <Home class="w-6 h-6" />
            <span class="text-[10px] font-bold">Home</span>
         </button>
         
-        <button class="flex flex-col items-center gap-1 opacity-50 hover:opacity-100 transition">
+        <button 
+            @click="activeTab = 'search'"
+            class="flex flex-col items-center gap-1 transition"
+            :class="showSearch ? 'opacity-100 text-primary scale-110' : 'opacity-40 hover:opacity-100'"
+        >
            <Search class="w-6 h-6" />
            <span class="text-[10px] font-bold">Recherche</span>
         </button>
 
-        <button @click="showProfileModal = true" class="flex flex-col items-center gap-1 opacity-50 hover:opacity-100 transition">
+        <button 
+            @click="activeTab = 'profile'"
+            class="flex flex-col items-center gap-1 transition"
+            :class="showProfile ? 'opacity-100 text-primary scale-110' : 'opacity-40 hover:opacity-100'"
+        >
            <UserCircle class="w-6 h-6" />
            <span class="text-[10px] font-bold">Profil</span>
         </button>
@@ -224,7 +556,12 @@ const openMap = (location) => {
 .fade-enter-active, .fade-leave-active {
   transition: opacity 0.3s ease;
 }
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
+
+/* Translation Up Animation */
+.up-enter-active, .up-leave-active {
+  transition: transform 0.3s ease-in-out;
+}
+.up-enter-from, .up-leave-to {
+  transform: translateY(100%);
 }
 </style>
