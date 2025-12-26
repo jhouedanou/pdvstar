@@ -3,42 +3,7 @@ import { ref } from 'vue'
 
 export const useEventStore = defineStore('events', () => {
     // Mock Data for MVP
-    const events = ref([
-        {
-            id: '3',
-            type: 'video',
-            title: 'Ambiance Ndombolo 🔥',
-            date: new Date().toISOString(),
-            image: 'https://images.unsplash.com/photo-3514525253440-b393452e8d26?q=80&w=1000', // Thumbnail
-            video: 'https://videos.pexels.com/video-files/3196056/3196056-hd_1080_1920_25fps.mp4', // Vertical dancing video
-            organizer: 'Club Carré',
-            location: 'Gombe, Kinshasa',
-            distance: '1.2 km',
-            description: 'Ce soir grosse ambiance avec DJ Mombassa. Venez tôt pour les places assises ! #Rumba #Kinshasa'
-        },
-        {
-            id: '1',
-            type: 'image',
-            title: 'Soirée Rumba chez Tonton Jules',
-            date: new Date().toISOString(),
-            image: 'https://images.unsplash.com/photo-1542396601-dca920ea2807?q=80&w=1000&auto=format&fit=crop', // Beer image
-            organizer: 'Tonton Jules',
-            location: 'Matonge, Kinshasa',
-            distance: '0.5 km',
-            description: 'Soirée conviviale avec amis et famille. Ambiance chaleureuse garantie! Apéritifs et snacks fournis. 🍺🎉'
-        },
-        {
-            id: '2',
-            type: 'image',
-            title: 'Concert Fally Ipupa (Fan Club)',
-            date: new Date(Date.now() + 86400000).toISOString(),
-            image: 'https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=1000&auto=format&fit=crop', // Concert
-            organizer: 'Stade Martyrs',
-            location: 'Lingwala',
-            distance: '4.2 km',
-            description: 'Venez célébrer avec nous! Concert exceptionnel du roi de la rumba. Places limitées, réservez vite! 🎤✨'
-        }
-    ])
+    const events = ref([])
 
     const addEvent = (event) => {
         // Simulating backend ID generation
@@ -47,6 +12,50 @@ export const useEventStore = defineStore('events', () => {
         // Add to top of feed
         events.value.unshift(event)
     }
+
+    // Initialize with requested mock data
+    events.value = [
+        {
+            id: '1',
+            type: 'image',
+            title: 'Soirée Concert Rumba chez Tonton Jules',
+            date: new Date().toISOString(),
+            image: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1000&auto=format&fit=crop', // Night concert vibe
+            organizer: 'Tonton Jules',
+            location: 'Yopougon, Abidjan',
+            distance: '0.8 km',
+            description: 'La meilleure Rumba de la ville ! Venez écouter les classiques dans une ambiance 100% locale. Bière glacée et poulet braisé au menu. 🍗🍺',
+            participantCount: 42,
+            isRegistered: false
+        },
+        {
+            id: '2',
+            type: 'image',
+            title: 'Soirée DJ Mix à la Plage',
+            date: new Date(Date.now() + 86400000).toISOString(), // Tomorrow
+            image: 'https://images.unsplash.com/photo-1533174072545-e8d4aa97d893?q=80&w=1000&auto=format&fit=crop', // Beach party
+            organizer: 'Beach Club Étoile',
+            location: 'Grand-Bassam',
+            distance: '15 km',
+            description: 'Les meilleurs DJ de la capitale mixent les hits Coupé-Décalé et Afrobeat les pieds dans le sable ! 🏖️🔥',
+            participantCount: 128,
+            isRegistered: false
+        },
+        {
+            id: '3',
+            type: 'image',
+            title: 'Match CAN sur écran géant',
+            date: new Date(Date.now() + 172800000).toISOString(), // +2 days
+            image: 'https://images.unsplash.com/photo-1522778119026-d647f0565c6a?q=80&w=1000&auto=format&fit=crop', // Soccer match crowd
+            organizer: 'Fan Zone 225',
+            location: 'Marcory, Abidjan',
+            distance: '3.5 km',
+            description: 'Venez supporter les Éléphants ! Ambiance de feu garantie, maillots oranges exigés. 🇨🇮⚽',
+            participantCount: 350,
+            isRegistered: false
+        }
+    ]
+
 
     return { events, addEvent }
 })

@@ -1,0 +1,17 @@
+{
+  "name": "PDV Star",
+  "short_name": "PDV Star",
+  "description": "Découvrez les meilleurs événements autour de vous",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#FFD700",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

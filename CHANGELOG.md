@@ -2,6 +2,112 @@
 
 All notable changes to pdvstar will be documented in this file.
 
+## [1.1.0] - 2024-12-19
+
+### Added - Responsivité & Affichage Multi-Écrans
+
+#### Écrans Pliables & Atypiques
+- **Media Queries Flexibles**: Support complet pour Samsung Galaxy Fold et autres écrans pliables
+- **Adaptation Automatique**: Layout s'adapte aux modes fermé (~280px) et déplié (~512px-884px)
+- **Ratios d'Aspect**: Gestion des écrans ultra-larges (21:9) et ultra-hauts
+- **Wrapping Intelligent**: Flexbox/Grid pour éviter les débordements
+
+#### Mode Paysage
+- **Optimisation Android/iOS**: Layout optimisé pour le mode paysage sur les deux OS
+- **Espacement Adaptatif**: Réduction des espacements verticaux en paysage court (<500px)
+- **Boutons d'Action**: Taille réduite automatiquement en mode paysage
+- **Centrage Tablette**: Centrage automatique sur grands écrans en paysage
+- **Masquage Intelligent**: Éléments non essentiels masqués en paysage court
+
+#### PWA & Mobile
+- **Manifest PWA**: Fichier `manifest.json` avec orientation portrait suggérée
+- **Meta Tags**: Tags PWA pour meilleure expérience d'installation mobile
+- **Dynamic Viewport**: Utilisation de `dvh` pour gérer les barres d'adresse
+- **Safe Area**: Gestion améliorée des safe areas sur appareils notched
+
+#### Composants
+- **RotateDeviceMessage**: Nouveau composant optionnel pour inviter à la rotation
+- **Classes CSS Utilitaires**: 
+  - `.responsive-container` pour conteneurs adaptatifs
+  - `.flex-wrap-safe` pour wrapping sécurisé
+  - `.grid-auto-fit` pour grilles auto-adaptatives
+
+#### Documentation
+- **RESPONSIVE.md**: Guide complet de responsivité avec:
+  - Problèmes résolus et solutions
+  - Breakpoints de l'application
+  - Instructions de test
+  - Configuration et déploiement
+  - Décisions de design
+
+### Changed
+
+#### CSS
+- **src/style.css**: Ajout de ~200 lignes de media queries et utilities
+- **Prevention Débordements**: Rule `max-width: 100%` sur tous les éléments
+- **Images/Vidéos**: `object-fit: cover` pour éviter les déformations
+
+#### Composants Vue
+- **FeedUser.vue**: Ajout de classes sémantiques pour ciblage CSS:
+  - `.header-tabs`, `.feed-container`, `.event-slide`
+  - `.action-buttons`, `.action-button`, `.action-button-text`
+  - `.event-content`, `.music-ticker`, `.bottom-nav`
+
+#### HTML
+- **index.html**: 
+  - Ajout du lien vers `manifest.json`
+  - Meta tags PWA (theme-color, mobile-web-app-capable, etc.)
+  - Titre amélioré
+
+### Technical Details
+
+#### Nouveaux Fichiers
+- `public/manifest.json` - PWA manifest avec orientation portrait
+- `src/components/RotateDeviceMessage.vue` - Composant de rotation (optionnel)
+- `RESPONSIVE.md` - Documentation complète de responsivité
+
+#### Fichiers Modifiés
+- `src/style.css` - Media queries et utilities responsives
+- `src/views/FeedUser.vue` - Classes CSS sémantiques
+- `index.html` - Meta tags et manifest PWA
+
+### Breakpoints
+
+| Breakpoint | Largeur | Appareil Type | Adaptations |
+|------------|---------|---------------|-------------|
+| **XS** | < 320px | Galaxy Fold fermé | Texte réduit, espacement minimal |
+| **SM** | 320px - 512px | Mobiles standard | Layout normal |
+| **MD** | 512px - 884px | Galaxy Fold déplié | Contenu 70% largeur |
+| **LG** | 768px+ | Tablettes | Centrage avec max-width 600px |
+| **XL** | > 1024px | Desktop | Centrage avec max-width 60vh |
+
+### Browser Support
+
+- ✅ Chrome/Edge (Mobile & Desktop)
+- ✅ Safari (iOS & macOS)
+- ✅ Firefox (Mobile & Desktop)
+- ✅ Samsung Internet
+- ✅ Opera Mobile
+
+### Testing
+
+Tests recommandés sur:
+- Samsung Galaxy Fold (fermé & déplié)
+- Galaxy Z Flip
+- iPhone SE (écran étroit)
+- iPhone 14 Pro Max (écran large)
+- iPad Mini & iPad Pro
+- Mode paysage Android & iOS
+
+### Notes
+
+- Le composant `RotateDeviceMessage` est **désactivé par défaut**
+- L'application reste utilisable en mode paysage (pas de blocage)
+- L'orientation portrait est **suggérée** via le manifest, pas forcée
+- Tous les débordements horizontaux sont prévenus
+
+---
+
 ## [1.0.0] - 2025-01-15
 
 ### Added
