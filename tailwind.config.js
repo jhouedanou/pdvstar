@@ -27,6 +27,9 @@ export default {
           '0%': { transform: 'translateX(0%)' },
           '100%': { transform: 'translateX(-50%)' },
         }
+      },
+      spacing: {
+        'safe': 'env(safe-area-inset-bottom)',
       }
     },
   },

@@ -27,7 +27,7 @@ const handleAdClick = () => {
 </script>
 
 <template>
-  <div class="event-slide snap-start h-full w-full relative bg-dark-lighter flex items-end cursor-pointer overflow-hidden group" @click="handleAdClick">
+  <div class="event-slide snap-start h-screen w-full relative bg-dark-lighter flex items-end cursor-pointer overflow-hidden group shrink-0" @click="handleAdClick">
 
     <!-- Background Image -->
     <div class="absolute inset-0 bg-gray-900">
@@ -52,7 +52,7 @@ const handleAdClick = () => {
     </div>
 
     <!-- Right Side Actions (Minimal for Ad) -->
-    <div class="action-buttons absolute right-2 bottom-24 flex flex-col gap-6 z-20 items-center">
+    <div class="action-buttons absolute right-2 bottom-28 flex flex-col gap-6 z-20 items-center">
        <!-- Sponsor Logo/Avatar -->
        <div class="relative mb-2">
          <div class="w-12 h-12 rounded-full border-2 border-yellow-400 overflow-hidden p-0.5 bg-white shadow-lg transition-transform group-hover:scale-110">
@@ -71,7 +71,7 @@ const handleAdClick = () => {
     </div>
 
     <!-- Content Overlay (Bottom Left) -->
-    <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-16 flex flex-col items-start space-y-2 pointer-events-none">
+    <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-20 flex flex-col items-start space-y-2 pointer-events-none">
       <!-- Ad Badge -->
       <div class="bg-yellow-400/90 backdrop-blur-md text-black px-3 py-1.5 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg inline-block transition-all group-hover:bg-yellow-500">
         ✨ {{ ad.sponsor }}

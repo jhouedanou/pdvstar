@@ -1,12 +1,14 @@
 {
-  "name": "PDV Star",
-  "short_name": "PDV Star",
-  "description": "Découvrez les meilleurs événements autour de vous",
+  "name": "BABI VIBES - Nightlife Abidjan",
+  "short_name": "BABI VIBES",
+  "description": "Découvre les meilleurs événements, soirées et maquis autour de toi à Abidjan 🇨🇮",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#121212",
   "theme_color": "#FFD700",
   "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["entertainment", "lifestyle", "social"],
   "icons": [
     {
       "src": "/vite.svg",

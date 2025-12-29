@@ -39,7 +39,6 @@ export const useUserStore = defineStore('user', () => {
                 phone: profileData.phone,
                 email: profileData.email || '',
                 avatar: profileData.avatar || null,
-                avatar: profileData.avatar || null,
                 following: [],
                 role: 'user'
             })
@@ -106,6 +105,7 @@ export const useUserStore = defineStore('user', () => {
         isProfileComplete,
         authenticate,
         updateProfile,
+        toggleFollow,
         logout
     }
 })

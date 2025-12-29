@@ -215,6 +215,10 @@ const activeTab = computed({
 // --- Map Logic ---
 const mapContainer = ref(null)
 let mapInstance = null
+let routeLayer = null
+let userMarker = null
+const showRouteInfo = ref(false)
+const routeInfo = ref({ distance: '', duration: '' })
 
 // Inject Leaflet CSS & Listeners
 onMounted(() => {
@@ -469,13 +473,13 @@ const toggleTheme = () => {
     </div>
 
     <!-- MAIN FEED VIEW -->
-    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-full w-full overflow-y-scroll scroll-smooth no-scrollbar">
+    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll scroll-smooth no-scrollbar">
       <template v-for="item in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
         <!-- AD SLIDE -->
         <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
 
         <!-- EVENT SLIDE -->
-        <div v-else class="event-slide snap-start h-full w-full relative bg-dark-lighter flex items-end">
+        <div v-else class="event-slide snap-start h-screen w-full relative bg-dark-lighter flex items-end shrink-0">
 
         <!-- Background Image/Video -->
         <!-- Added transition for image loading feel -->
@@ -494,7 +498,7 @@ const toggleTheme = () => {
         </div>
         
         <!-- Right Side Actions (Floating properly aligned) -->
-        <div class="action-buttons absolute right-2 bottom-24 flex flex-col gap-6 z-20 items-center">
+        <div class="action-buttons absolute right-2 bottom-28 flex flex-col gap-6 z-20 items-center">
            <!-- Profile/Organizer Avatar (TikTok style) -->
            <div class="relative mb-2 cursor-pointer" @click="openOrganizerProfile(item.data.organizer)">
              <div class="w-12 h-12 rounded-full border-2 border-primary overflow-hidden p-0.5">
@@ -544,8 +548,8 @@ const toggleTheme = () => {
         </div>
 
         <!-- Content Overlay (Bottom Left) -->
-        <!-- mb-16 to clear the bottom navigation -->
-        <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-16 flex flex-col items-start space-y-2 pointer-events-none">
+        <!-- mb-20 to clear the bottom navigation -->
+        <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-20 flex flex-col items-start space-y-2 pointer-events-none">
           <!-- Promo Label -->
           <div v-if="!item.data.isPremium" class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
             🔥 2 achetées = 1 offerte
@@ -655,7 +659,7 @@ const toggleTheme = () => {
                         </p>
 
                         <!-- COMMANDS / ACTIONS -->
-                        <div class="grid grid-cols-2 gap-3 safe-area-bottom pb-4">
+                        <div class="grid grid-cols-2 gap-3 pb-4">
                             <button 
                                 @click="handleJyVais(selectedMapEvent)"
                                 class="flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition active:scale-95"
@@ -810,7 +814,7 @@ const toggleTheme = () => {
     </transition>
     
     <!-- Simple Bottom Navigation (Home, Recherche, Carte, Profil) -->
-    <div class="bottom-nav fixed bottom-0 w-full z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around items-center h-16 border-t border-gray-200 dark:border-white/10 safe-area-bottom transition-colors duration-300">
+    <div class="bottom-nav fixed bottom-0 w-full z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around items-center h-16 border-t border-gray-200 dark:border-white/10 pb-safe transition-colors duration-300">
         <button 
             @click="activeTab = 'feed'"
             class="flex flex-col items-center gap-1 transition"
