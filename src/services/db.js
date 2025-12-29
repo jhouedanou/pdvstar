@@ -16,26 +16,26 @@ class MockDB {
     // --- HELPERS ---
     getPlaceholderImage(indexOrRandom) {
         const placeholders = [
-            'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=800', // Nightclub with lights
-            'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=800', // Concert crowd
-            'https://images.unsplash.com/photo-1514525253440-b393452e8d26?q=80&w=800', // DJ performing
-            'https://images.unsplash.com/photo-1574391884720-2e40d0246a48?q=80&w=800', // Cocktail drinks
-            'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800', // Live music concert
-            'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=800', // Nightclub interior
-            'https://images.unsplash.com/photo-1571266028243-d220c6e2e9cf?q=80&w=800', // DJ booth neon
-            'https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?q=80&w=800', // Club dance floor
-            'https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?q=80&w=800', // Party confetti
-            'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=800', // Stage concert
-            'https://images.unsplash.com/photo-1519741497674-611481863552?q=80&w=800', // Rooftop party
-            'https://images.unsplash.com/photo-1533174072545-e8d4aa97d893?q=80&w=800', // Beach party sunset
-            'https://images.unsplash.com/photo-1505236858219-8359eb29e329?q=80&w=800', // Bar atmosphere
-            'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?q=80&w=800', // Festival crowd
-            'https://images.unsplash.com/photo-1506157786151-b8491531f063?q=80&w=800', // Lounge setting
-            'https://images.unsplash.com/photo-1598387181032-a3103a2db5b3?q=80&w=800', // DJ mixer close-up
-            'https://images.unsplash.com/photo-1547620916-c41e3b5c4a5f?q=80&w=800', // Party lights purple
-            'https://images.unsplash.com/photo-1571266028243-d220c6e2e9cf?q=80&w=800', // Neon club lights
-            'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?q=80&w=800', // Urban nightlife
-            'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?q=80&w=800'  // City nightlife skyline
+            'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?w=800&auto=format&fit=crop', // Nightclub with lights
+            'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800&auto=format&fit=crop', // Concert crowd
+            'https://images.unsplash.com/photo-1514525253440-b393452e8d26?w=800&auto=format&fit=crop', // DJ performing
+            'https://images.unsplash.com/photo-1574391884720-2e40d0246a48?w=800&auto=format&fit=crop', // Cocktail drinks
+            'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&auto=format&fit=crop', // Live music concert
+            'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800&auto=format&fit=crop', // Nightclub interior
+            'https://images.unsplash.com/photo-1571266028243-d220c6e2e9cf?w=800&auto=format&fit=crop', // DJ booth neon
+            'https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?w=800&auto=format&fit=crop', // Club dance floor
+            'https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800&auto=format&fit=crop', // Party confetti
+            'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=800&auto=format&fit=crop', // Stage with lights
+            'https://images.unsplash.com/photo-1519741497674-611481863552?w=800&auto=format&fit=crop', // Rooftop party
+            'https://images.unsplash.com/photo-1533174072545-e8d4aa97d893?w=800&auto=format&fit=crop', // Beach party sunset
+            'https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=800&auto=format&fit=crop', // Bar atmosphere
+            'https://images.unsplash.com/photo-1519167758481-83f29da8ba41?w=800&auto=format&fit=crop', // Festival crowd
+            'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=800&auto=format&fit=crop', // Lounge setting
+            'https://images.unsplash.com/photo-1598387181032-a3103a2db5b3?w=800&auto=format&fit=crop', // DJ mixer close-up
+            'https://images.unsplash.com/photo-1547620916-c41e3b5c4a5f?w=800&auto=format&fit=crop', // Party lights purple
+            'https://images.unsplash.com/photo-1563841930606-67e2bce48b78?w=800&auto=format&fit=crop', // Neon club lights
+            'https://images.unsplash.com/photo-1509824227185-9c5a01ceba0d?w=800&auto=format&fit=crop', // Urban nightlife
+            'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&auto=format&fit=crop'  // City nightlife skyline
         ]
         const idx = typeof indexOrRandom === 'number'
             ? indexOrRandom

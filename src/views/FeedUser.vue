@@ -3,12 +3,14 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown } from 'lucide-vue-next'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import OrganizerProfile from '../components/OrganizerProfile.vue'
+import AdBanner from '../components/AdBanner.vue'
 import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
 import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
+import { db } from '../services/db'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -18,6 +20,30 @@ const sendingMessage = ref(false)
 const messageError = ref('')
 const messageSuccess = ref('')
 const { coords, resume } = useGeolocation()
+
+// Get Ads from DB
+const ads = ref(db.getAds())
+
+// Mix events and ads (every 5 events, insert an ad)
+const feedItems = computed(() => {
+    const items = []
+    const events = eventStore.events
+    const adsList = ads.value
+
+    events.forEach((event, index) => {
+        items.push({ type: 'event', data: event })
+
+        // Insert ad every 5 events
+        if ((index + 1) % 5 === 0 && adsList[Math.floor(index / 5) % adsList.length]) {
+            items.push({
+                type: 'ad',
+                data: adsList[Math.floor(index / 5) % adsList.length]
+            })
+        }
+    })
+
+    return items
+})
 
 // Toast State
 const showToast = ref(false)
@@ -368,52 +394,64 @@ const toggleTheme = () => {
 
     <!-- MAIN FEED VIEW -->
     <div class="feed-container snap-y snap-mandatory h-full w-full overflow-y-scroll scroll-smooth no-scrollbar">
-      <div v-for="event in eventStore.events" :key="event.id" 
-           class="event-slide snap-start h-full w-full relative bg-dark-lighter flex items-end">
-        
+      <template v-for="item in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
+        <!-- AD SLIDE -->
+        <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
+
+        <!-- EVENT SLIDE -->
+        <div v-else class="event-slide snap-start h-full w-full relative bg-dark-lighter flex items-end">
+
         <!-- Background Image/Video -->
         <!-- Added transition for image loading feel -->
         <div class="absolute inset-0 bg-gray-900">
-           <video v-if="event.type === 'video'" :src="event.video" autoplay loop muted playsinline class="w-full h-full object-cover opacity-100"></video>
-           <img v-else :src="event.image" alt="Event Cover" class="w-full h-full object-cover opacity-90" />
+           <video v-if="item.data.type === 'video'" :src="item.data.video" autoplay loop muted playsinline class="w-full h-full object-cover opacity-100"></video>
+           <img v-else :src="item.data.image" alt="Event Cover" class="w-full h-full object-cover opacity-90" />
            <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/90"></div>
+        </div>
+
+        <!-- Premium Badge (Top Left) -->
+        <div v-if="item.data.isPremium" class="absolute top-20 left-4 z-20">
+            <div class="bg-gradient-to-r from-yellow-400 to-orange-500 text-black px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 shadow-lg">
+                <Crown class="w-4 h-4" />
+                <span>PREMIUM</span>
+            </div>
         </div>
         
         <!-- Right Side Actions (Floating properly aligned) -->
         <div class="action-buttons absolute right-2 bottom-24 flex flex-col gap-6 z-20 items-center">
            <!-- Profile/Organizer Avatar (TikTok style) -->
-           <div class="relative mb-2 cursor-pointer" @click="openOrganizerProfile(event.organizer)">
+           <div class="relative mb-2 cursor-pointer" @click="openOrganizerProfile(item.data.organizer)">
              <div class="w-12 h-12 rounded-full border-2 border-primary overflow-hidden p-0.5">
-               <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${event.organizer}`" class="w-full h-full rounded-full bg-white" />
+               <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${item.data.organizer}`" class="w-full h-full rounded-full bg-white" />
              </div>
              <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-primary rounded-full w-5 h-5 flex items-center justify-center border border-black">
                <span class="text-black text-xs font-bold">+</span>
              </div>
            </div>
 
-            <button 
-              @click="handleJyVais(event)"
+            <button
+              @click="handleJyVais(item.data)"
               class="action-button flex flex-col items-center gap-1 group">
               <div class="relative">
-                <Heart 
-                    class="w-9 h-9 transition-transform duration-200" 
-                    :class="event.isRegistered ? 'fill-green-500 text-green-500 scale-110' : 'text-white fill-white/10 group-active:scale-75'"
+                <Heart
+                    class="w-9 h-9 transition-transform duration-200"
+                    :class="item.data.isRegistered ? 'fill-green-500 text-green-500 scale-110' : 'text-white fill-white/10 group-active:scale-75'"
                 />
               </div>
               <span class="action-button-text text-xs font-semibold drop-shadow-md">
-                {{ event.isRegistered ? 'Inscrit' : `J'y vais` }}
+                {{ item.data.isRegistered ? 'Inscrit' : `J'y vais` }}
               </span>
-              <span class="text-[10px] font-bold">{{ event.participantCount }}</span>
+              <span class="text-[10px] font-bold">{{ item.data.participantCount }}</span>
             </button>
-           
-            <button @click="openMap(event.location)" class="action-button flex flex-col items-center gap-1 group">
+
+            <button @click="openMap(item.data.location)" class="action-button flex flex-col items-center gap-1 group">
               <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
                  <MapPin class="w-6 h-6 text-white"/>
               </div>
               <span class="action-button-text text-xs font-semibold drop-shadow-md">Map</span>
             </button>
 
-           <button @click="handleShare(event)" class="action-button flex flex-col items-center gap-1 group">
+           <button @click="handleShare(item.data)" class="action-button flex flex-col items-center gap-1 group">
              <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
                 <Share2 class="w-6 h-6 text-white"/>
              </div>
@@ -423,7 +461,7 @@ const toggleTheme = () => {
            <!-- Spinning Disc (TikTok Vibe) -->
            <div class="mt-4 relative">
               <div class="w-12 h-12 rounded-full bg-black border-[3px] border-dark-lighter flex items-center justify-center animate-spin-slow overflow-hidden">
-                 <img :src="event.image" class="w-full h-full object-cover opacity-80" />
+                 <img :src="item.data.image" class="w-full h-full object-cover opacity-80" />
               </div>
               <!-- Floating Notes Animation would go here -->
            </div>
@@ -433,23 +471,36 @@ const toggleTheme = () => {
         <!-- mb-16 to clear the bottom navigation -->
         <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-16 flex flex-col items-start space-y-2 pointer-events-none">
           <!-- Promo Label -->
-          <div class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
+          <div v-if="!item.data.isPremium" class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
             🔥 2 achetées = 1 offerte
           </div>
 
+          <!-- Premium Price Tag -->
+          <div v-else class="bg-gradient-to-r from-yellow-400 to-orange-500 text-black px-4 py-1.5 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg inline-flex items-center gap-2">
+            <Crown class="w-4 h-4" />
+            <span>{{ item.data.price?.toLocaleString() }} CFA</span>
+          </div>
+
           <div class="max-w-[85%]">
-            <h2 class="text-2xl font-bold leading-tight mb-1 text-white text-shadow">{{ event.title }}</h2>
+            <h2 class="text-2xl font-bold leading-tight mb-1 text-white text-shadow">{{ item.data.title }}</h2>
             <div class="flex items-center text-gray-200 font-medium text-sm gap-2">
-                <span class="flex items-center text-primary"><MapPin class="w-4 h-4 mr-0.5"/> {{ event.location }}</span>
+                <span class="flex items-center text-primary"><MapPin class="w-4 h-4 mr-0.5"/> {{ item.data.location }}</span>
                 <span class="text-gray-400">•</span>
-                <span class="text-gray-300">{{ event.distance }}</span>
+                <span class="text-gray-300">{{ item.data.distance }}</span>
             </div>
           </div>
-          
+
           <!-- Collapsed Description (TikTok style) -->
           <p class="text-gray-200 text-sm line-clamp-2 w-[85%] leading-relaxed opacity-90 mb-2">
-            {{ event.description || 'Découvrez cet événement incontournable!' }}
+            {{ item.data.description || 'Découvrez cet événement incontournable!' }}
           </p>
+
+          <!-- Premium Features -->
+          <div v-if="item.data.isPremium && item.data.features?.length" class="flex flex-wrap gap-1.5 w-[85%]">
+            <span v-for="feature in item.data.features" :key="feature" class="bg-white/20 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full font-medium">
+                ✨ {{ feature }}
+            </span>
+          </div>
 
           <!-- Music Ticker -->
           <div class="music-ticker flex items-center gap-2 w-[70%] overflow-hidden">
@@ -462,7 +513,8 @@ const toggleTheme = () => {
           </div>
         </div>
 
-      </div>
+        </div>
+      </template>
     </div>
 
     <!-- MAP MODAL (Full Screen Popup) -->
