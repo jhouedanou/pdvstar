@@ -79,7 +79,7 @@ const handleSubmit = async () => {
     <div class="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-gray-200 dark:border-gray-800 transition-colors duration-300">
       <!-- Header -->
       <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Bienvenue sur pdvstar 🎉</h1>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Bienvenue sur BABI VIBES 🇨🇮</h1>
         <p class="text-gray-500 dark:text-gray-400 text-sm">Complétez votre profil pour commencer</p>
       </div>
 

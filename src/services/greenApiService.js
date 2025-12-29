@@ -18,9 +18,12 @@ const getGreenApiConfig = () => {
  * @returns {string} Cleaned phone number
  */
 const cleanIvorianPhoneNumber = (phoneNumber) => {
-    // If number starts with +22507, remove the 07
-    if (phoneNumber.startsWith('+22507')) {
-        return phoneNumber.replace('+22507', '+225')
+    // Remove the first 2 digits after +225 (e.g. +2250748... -> +22548...)
+    // This effectively converts new 10-digit format to old 8-digit format if that's what's intended
+    const ivorianRegex = /^(\+225)\d{2}(\d+)$/
+    const match = phoneNumber.match(ivorianRegex)
+    if (match) {
+        return `${match[1]}${match[2]}`
     }
     return phoneNumber
 }

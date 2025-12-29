@@ -4,7 +4,6 @@ import { useStorage } from '@vueuse/core'
 class MockDB {
     constructor() {
         // Persistent storage using VueUse (wraps localStorage)
-        // This acts as our "JSON Database"
         this.users = useStorage('pdvstar_db_users', [])
         this.events = useStorage('pdvstar_db_events', [])
 
@@ -12,6 +11,23 @@ class MockDB {
         if (this.events.value.length === 0) {
             this.seedEvents()
         }
+    }
+
+    // --- HELPERS ---
+    getPlaceholderImage(indexOrRandom) {
+        const placeholders = [
+            'https://images.unsplash.com/photo-1542396601-dca920ea2807?q=80&w=600', // Bar
+            'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600', // Club
+            'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=600', // Concert
+            'https://images.unsplash.com/photo-1533174072545-e8d4aa97d893?q=80&w=600', // Beach Party
+            'https://images.unsplash.com/photo-1522778119026-d647f0565c6a?q=80&w=600', // Crowd
+            'https://images.unsplash.com/photo-1514525253440-b393452e8d26?q=80&w=600', // DJ
+            'https://images.unsplash.com/photo-1574391884720-2e40d0246a48?q=80&w=600'  // Drink
+        ]
+        const idx = typeof indexOrRandom === 'number'
+            ? indexOrRandom
+            : Math.floor(Math.random() * placeholders.length)
+        return placeholders[idx % placeholders.length]
     }
 
     // --- USERS ---
@@ -40,19 +56,21 @@ class MockDB {
 
     // --- EVENTS ---
     getEvents() {
-        // Return reverse chronological (newest first)
         return [...this.events.value].sort((a, b) => new Date(b.created_at || b.date) - new Date(a.created_at || a.date))
     }
 
     createEvent(eventData) {
+        // Ensure image is present, if not use placeholder
+        const image = eventData.image || this.getPlaceholderImage()
+
         const newEvent = {
             id: Math.random().toString(36).substr(2, 9),
             createdAt: new Date().toISOString(),
             participantCount: 0,
-            isRegistered: false, // Per user session (simulated)
-            ...eventData
+            isRegistered: false,
+            ...eventData,
+            image: image
         }
-        // Add to beginning
         this.events.value.unshift(newEvent)
         return newEvent
     }
@@ -67,6 +85,7 @@ class MockDB {
     }
 
     seedEvents() {
+        // Re-seed with reliable images
         const today = new Date()
         const initialEvents = [
             {
@@ -74,7 +93,7 @@ class MockDB {
                 type: 'image',
                 title: 'Soirée Concert Rumba chez Tonton Jules',
                 date: new Date().toISOString(),
-                image: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1000&auto=format&fit=crop',
+                image: this.getPlaceholderImage(2),
                 organizer: 'Tonton Jules',
                 location: 'Yopougon, Abidjan',
                 coords: { lat: 5.30966, lng: -3.99 },
@@ -87,7 +106,7 @@ class MockDB {
                 type: 'image',
                 title: 'Soirée DJ Mix à la Plage',
                 date: new Date(today.getTime() + 86400000).toISOString(),
-                image: 'https://images.unsplash.com/photo-1533174072545-e8d4aa97d893?q=80&w=1000&auto=format&fit=crop',
+                image: this.getPlaceholderImage(3),
                 organizer: 'Beach Club Étoile',
                 location: 'Grand-Bassam',
                 coords: { lat: 5.20, lng: -3.73 },
@@ -100,7 +119,7 @@ class MockDB {
                 type: 'image',
                 title: 'Match CAN sur écran géant',
                 date: new Date(today.getTime() + 172800000).toISOString(),
-                image: 'https://images.unsplash.com/photo-1522778119026-d647f0565c6a?q=80&w=1000&auto=format&fit=crop',
+                image: this.getPlaceholderImage(4),
                 organizer: 'Fan Zone 225',
                 location: 'Marcory, Abidjan',
                 coords: { lat: 5.305, lng: -3.97 },

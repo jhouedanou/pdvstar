@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
+import { useGeolocation } from '@vueuse/core'
 import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon } from 'lucide-vue-next'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import L from 'leaflet'
@@ -15,11 +16,80 @@ const showProfileModal = ref(false)
 const sendingMessage = ref(false)
 const messageError = ref('')
 const messageSuccess = ref('')
+const { coords, resume } = useGeolocation()
+
+// Toast State
+const showToast = ref(false)
+const toastEvent = ref(null)
+
+// Haversine Distance Helper
+const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371 // Radius of the earth in km
+  const dLat = deg2rad(lat2 - lat1)
+  const dLon = deg2rad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat1)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+const deg2rad = (deg) => {
+  return deg * (Math.PI / 180)
+}
+
+const checkNearbyEvents = () => {
+    // Find closest event
+    let closest = null
+    let minDist = Infinity
+    
+    eventStore.events.forEach(event => {
+        if (event.coords) {
+            const d = getDistanceFromLatLonInKm(
+                coords.value.latitude, coords.value.longitude,
+                event.coords.lat, event.coords.lng
+            )
+            if (d < minDist) {
+                minDist = d
+                closest = event
+            }
+        }
+    })
+
+    // If close enough (< 5km) and not registered
+    if (closest && minDist < 5 && !closest.isRegistered) {
+        toastEvent.value = closest
+        showToast.value = true
+        // Auto hide after 8s
+        setTimeout(() => showToast.value = false, 8000)
+    }
+}
+
+const scrollToEvent = (id) => {
+    showToast.value = false
+    // Ideally scroll, but for now just acknowledge
+    // activeTab.value = 'feed'
+}
 
 onMounted(() => {
     // Show profile modal if user doesn't have a profile
     if (!userStore.isProfileComplete) {
         showProfileModal.value = true
+    }
+
+    // Check Location Recommendations
+    if (coords.value.latitude !== Infinity) {
+        checkNearbyEvents()
+    } else {
+        resume() // Try ensuring permission
+        // Watch for coord update once
+        const unwatch = watch(coords, (newCoords) => {
+            if (newCoords.latitude !== Infinity) {
+                checkNearbyEvents()
+                unwatch()
+            }
+        })
     }
 })
 
@@ -87,6 +157,10 @@ watch(showMap, async (isOpen) => {
     if (isOpen) {
         await nextTick()
         initMap()
+        // If an event is selected (e.g. from Itinerary click), fly to it
+        if (selectedMapEvent.value && mapInstance) {
+            mapInstance.setView([selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng], 16)
+        }
     } else {
         if (mapInstance) {
             mapInstance.remove()
@@ -98,8 +172,12 @@ watch(showMap, async (isOpen) => {
 const initMap = () => {
     if (mapInstance) mapInstance.remove() // Safety cleanup
 
-    // Center on Abidjan (Marcory)
-    mapInstance = L.map(mapContainer.value).setView([5.30966, -3.97449], 14)
+    // Center on Abidjan (Marcory) or Selected Event
+    const center = selectedMapEvent.value 
+        ? [selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng] 
+        : [5.30966, -3.97449]
+
+    mapInstance = L.map(mapContainer.value).setView(center, selectedMapEvent.value ? 16 : 14)
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
@@ -195,14 +273,19 @@ const handleJyVais = async (event) => {
 }
 
 const handleItinerary = async (event) => {
-    if (!userStore.user || !userStore.user.phone) {
+    selectedMapEvent.value = event
+    showMap.value = true
+}
+
+const sendItineraryWhatsApp = async (event) => {
+     if (!userStore.user || !userStore.user.phone) {
         showProfileModal.value = true
         return
-    }
+     }
 
-    messageSuccess.value = 'Envoi de l\'itinéraire sur WhatsApp...'
-    
-    try {
+     messageSuccess.value = 'Envoi de l\'itinéraire sur WhatsApp...'
+     // ... code for whatsapp ...
+     try {
         await sendWhatsAppLocation(
             userStore.user.phone,
             event.coords.lat,
@@ -253,7 +336,7 @@ const toggleTheme = () => {
                 <span class="text-[10px] font-normal">Carte</span>
             </button>
             <div class="text-white text-xl font-bold border-b-2 border-primary pb-0.5 shadow-lg">
-                À la une 🔥
+                BABI VIBES ✨
             </div>
        </div>
     </div>
@@ -434,7 +517,14 @@ const toggleTheme = () => {
                                 class="flex items-center justify-center gap-2 py-3 rounded-xl bg-gray-700 text-white font-bold hover:bg-gray-600 transition active:scale-95"
                             >
                                 <MapIcon class="w-5 h-5" />
-                                Itinéraire (WhatsApp)
+                                Voir sur la Carte
+                            </button>
+                            
+                            <button 
+                                @click="sendItineraryWhatsApp(selectedMapEvent)"
+                                class="col-span-2 flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600/20 text-green-500 font-bold hover:bg-green-600/30 transition active:scale-95 border border-green-600/50 mt-2"
+                            >
+                                🗺️ Envoyer sur WhatsApp
                             </button>
                         </div>
                     </div>
@@ -590,6 +680,28 @@ const toggleTheme = () => {
         <span>{{ messageError }}</span>
       </div>
     </transition>
+    <!-- Location Toast Recommendation -->
+    <Transition
+        enter-active-class="transform ease-out duration-300 transition"
+        enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2"
+        enter-to-class="translate-y-0 opacity-100 sm:translate-x-0"
+        leave-active-class="transition ease-in duration-100"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+    >
+        <div v-if="showToast && toastEvent" class="fixed top-4 left-4 right-4 z-50 bg-gray-900 border border-primary text-white p-4 rounded-2xl shadow-2xl flex items-center gap-4 cursor-pointer" @click="scrollToEvent(toastEvent.id)">
+            <div class="bg-primary/20 p-2 rounded-full">
+                <MapPin class="w-6 h-6 text-primary" />
+            </div>
+            <div class="flex-1">
+                <p class="text-xs text-gray-400">À proximité ({{ getDistanceFromLatLonInKm(coords.latitude, coords.longitude, toastEvent.coords.lat, toastEvent.coords.lng).toFixed(1) }} km)</p>
+                <p class="font-bold text-sm">"{{ toastEvent.title }}" commence bientôt !</p>
+                <p class="text-xs text-primary font-bold">J'y vais ? 👉</p>
+            </div>
+            <button @click.stop="showToast = false" class="text-gray-500 hover:text-white">✕</button>
+        </div>
+    </Transition>
+
   </div>
 </template>
 

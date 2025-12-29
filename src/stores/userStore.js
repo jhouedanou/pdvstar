@@ -6,7 +6,16 @@ export const useUserStore = defineStore('user', () => {
     // Load current session from localStorage (pointer to logged in user)
     const loadSession = () => {
         const stored = localStorage.getItem('pdvstar_session_user')
-        return stored ? JSON.parse(stored) : null
+        if (stored) {
+            const session = JSON.parse(stored)
+            // Check expiry (7 Days)
+            if (session.expiry && Date.now() > session.expiry) {
+                localStorage.removeItem('pdvstar_session_user')
+                return null
+            }
+            return session.user
+        }
+        return null
     }
 
     const user = ref(loadSession())
@@ -19,12 +28,13 @@ export const useUserStore = defineStore('user', () => {
     const authenticate = (profileData) => {
         let existingUser = db.findUserByPhone(profileData.phone)
 
+        let currentUser;
         if (existingUser) {
             // Login
-            user.value = existingUser
+            currentUser = existingUser
         } else {
             // Register
-            user.value = db.createUser({
+            currentUser = db.createUser({
                 name: profileData.name || `Utilisateur ${profileData.phone}`,
                 phone: profileData.phone,
                 email: profileData.email || '',
@@ -32,8 +42,14 @@ export const useUserStore = defineStore('user', () => {
             })
         }
 
-        // Save session
-        localStorage.setItem('pdvstar_session_user', JSON.stringify(user.value))
+        user.value = currentUser
+
+        // Save session with Expiry (7 Days)
+        const session = {
+            user: user.value,
+            expiry: Date.now() + (7 * 24 * 60 * 60 * 1000) // 1 Week
+        }
+        localStorage.setItem('pdvstar_session_user', JSON.stringify(session))
         return user.value
     }
 
@@ -42,7 +58,15 @@ export const useUserStore = defineStore('user', () => {
             const updated = db.updateUser(user.value.id, updates)
             if (updated) {
                 user.value = updated
-                localStorage.setItem('pdvstar_session_user', JSON.stringify(updated))
+                // Update session keeping expiry
+                const stored = localStorage.getItem('pdvstar_session_user')
+                const currentSession = stored ? JSON.parse(stored) : { expiry: Date.now() + (7 * 24 * 60 * 60 * 1000) }
+
+                const newSession = {
+                    ...currentSession,
+                    user: updated
+                }
+                localStorage.setItem('pdvstar_session_user', JSON.stringify(newSession))
             }
         }
     }
