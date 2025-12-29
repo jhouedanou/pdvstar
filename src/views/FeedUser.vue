@@ -93,10 +93,40 @@ const checkNearbyEvents = () => {
     }
 }
 
-const scrollToEvent = (id) => {
+const scrollToEvent = async (id) => {
     showToast.value = false
-    // Ideally scroll, but for now just acknowledge
-    // activeTab.value = 'feed'
+
+    // Find the event
+    const event = eventStore.events.find(e => e.id === id)
+
+    // Auto-register if not already registered
+    if (event && !event.isRegistered) {
+        await handleJyVais(event)
+    }
+
+    // Make sure we're on feed tab
+    if (showMap.value || showSearch.value || showProfile.value) {
+        activeTab.value = 'feed'
+    }
+
+    // Wait for next tick to ensure DOM is updated
+    nextTick(() => {
+        // Find the index of the event in feedItems
+        const eventIndex = feedItems.value.findIndex(item =>
+            item.type === 'event' && item.data.id === id
+        )
+
+        if (eventIndex !== -1 && feedContainer.value) {
+            // Scroll to the event (each slide is 100vh)
+            const slideHeight = window.innerHeight
+            const targetScroll = eventIndex * slideHeight
+
+            feedContainer.value.scrollTo({
+                top: targetScroll,
+                behavior: 'smooth'
+            })
+        }
+    })
 }
 
 // Wheel scroll handling for feed
@@ -266,8 +296,8 @@ const initMap = () => {
     if (mapInstance) mapInstance.remove() // Safety cleanup
 
     // Center on Abidjan (Marcory) or Selected Event
-    const center = selectedMapEvent.value 
-        ? [selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng] 
+    const center = selectedMapEvent.value
+        ? [selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng]
         : [5.30966, -3.97449]
 
     mapInstance = L.map(mapContainer.value).setView(center, selectedMapEvent.value ? 16 : 14)
@@ -278,13 +308,36 @@ const initMap = () => {
         maxZoom: 20
     }).addTo(mapInstance)
 
+    // Add user location marker if available
+    if (coords.value.latitude !== Infinity) {
+        const userIcon = L.divIcon({
+            className: 'user-location-marker',
+            html: `<div style="background: #00f2ea; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,242,234,0.5);"></div>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        })
+
+        userMarker = L.marker([coords.value.latitude, coords.value.longitude], { icon: userIcon })
+            .addTo(mapInstance)
+            .bindPopup('<div class="text-black text-center font-bold text-xs">📍 Vous êtes ici</div>')
+    }
+
     // Add Markers from Store
     let markerCount = 0
     eventStore.events.forEach(event => {
         if (event.coords) {
             markerCount++
-            const marker = L.marker([event.coords.lat, event.coords.lng]).addTo(mapInstance)
-            
+
+            // Custom icon for events
+            const eventIcon = L.divIcon({
+                className: 'event-marker',
+                html: `<div style="background: #FFD700; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">🎉</div>`,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            })
+
+            const marker = L.marker([event.coords.lat, event.coords.lng], { icon: eventIcon }).addTo(mapInstance)
+
             // Custom Popup
             const popupContent = `
                 <div class="text-black text-center">
@@ -297,8 +350,55 @@ const initMap = () => {
             marker.bindPopup(popupContent)
         }
     })
-    
+
     console.log(`📍 ${markerCount} événements affichés sur la carte sur ${eventStore.events.length} total`)
+
+    // If event is selected and user location is available, show route
+    if (selectedMapEvent.value && selectedMapEvent.value.coords && coords.value.latitude !== Infinity) {
+        drawRoute(coords.value.latitude, coords.value.longitude, selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng)
+    }
+}
+
+const drawRoute = async (fromLat, fromLng, toLat, toLng) => {
+    try {
+        // Remove existing route
+        if (routeLayer) {
+            mapInstance.removeLayer(routeLayer)
+        }
+
+        // Call OSRM API for routing
+        const response = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`
+        )
+        const data = await response.json()
+
+        if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+            const route = data.routes[0]
+
+            // Draw route on map
+            routeLayer = L.geoJSON(route.geometry, {
+                style: {
+                    color: '#00f2ea',
+                    weight: 4,
+                    opacity: 0.8
+                }
+            }).addTo(mapInstance)
+
+            // Fit map to show entire route
+            mapInstance.fitBounds(routeLayer.getBounds(), { padding: [50, 50] })
+
+            // Update route info
+            const distanceKm = (route.distance / 1000).toFixed(1)
+            const durationMin = Math.round(route.duration / 60)
+            routeInfo.value = {
+                distance: `${distanceKm} km`,
+                duration: `${durationMin} min`
+            }
+            showRouteInfo.value = true
+        }
+    } catch (error) {
+        console.error('Error fetching route:', error)
+    }
 }
 
 
@@ -387,6 +487,22 @@ const handleJyVais = async (event) => {
 const handleItinerary = async (event) => {
     selectedMapEvent.value = event
     showMap.value = true
+    // Route will be drawn automatically in initMap when map opens
+}
+
+const toggleRoute = () => {
+    if (!selectedMapEvent.value || !selectedMapEvent.value.coords || coords.value.latitude === Infinity) {
+        return
+    }
+
+    if (routeLayer && mapInstance.hasLayer(routeLayer)) {
+        // Hide route
+        mapInstance.removeLayer(routeLayer)
+        showRouteInfo.value = false
+    } else {
+        // Show route
+        drawRoute(coords.value.latitude, coords.value.longitude, selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng)
+    }
 }
 
 const sendItineraryWhatsApp = async (event) => {
@@ -610,11 +726,37 @@ const toggleTheme = () => {
 
             <!-- Map Container -->
             <div ref="mapContainer" class="w-full h-full relative z-10"></div>
-            
+
+            <!-- Route Info Card (Top Center) -->
+            <transition name="fade">
+                <div v-if="showRouteInfo" class="absolute top-20 left-1/2 -translate-x-1/2 z-[500] bg-primary text-black px-4 py-2 rounded-full shadow-lg pointer-events-auto flex items-center gap-3">
+                    <div class="flex items-center gap-1">
+                        <span class="text-xs font-bold">📍 {{ routeInfo.distance }}</span>
+                    </div>
+                    <div class="w-[1px] h-4 bg-black/20"></div>
+                    <div class="flex items-center gap-1">
+                        <span class="text-xs font-bold">🕐 {{ routeInfo.duration }}</span>
+                    </div>
+                    <button @click="toggleRoute" class="ml-2 bg-black/20 hover:bg-black/30 p-1 rounded-full transition">
+                        <X class="w-3 h-3" />
+                    </button>
+                </div>
+            </transition>
+
              <!-- Floating Info (Hide if event is selected) -->
             <div v-if="!selectedMapEvent" class="absolute bottom-10 left-4 right-4 z-[500] bg-black/80 backdrop-blur-md p-3 rounded-xl border border-white/10 pointer-events-none">
                 <p class="text-white text-center text-xs">Déplacez-vous sur la carte pour voir les événements.</p>
             </div>
+
+            <!-- Route Toggle Button (Bottom Right) -->
+            <button
+                v-if="selectedMapEvent && coords.latitude !== Infinity"
+                @click="toggleRoute"
+                class="absolute bottom-32 right-4 z-[500] bg-primary text-black p-3 rounded-full shadow-lg pointer-events-auto hover:bg-primary/90 transition flex items-center gap-2 font-bold text-sm"
+            >
+                <MapIcon class="w-5 h-5" />
+                <span>{{ routeLayer && mapInstance?.hasLayer(routeLayer) ? 'Masquer' : 'Itinéraire' }}</span>
+            </button>
 
             <!-- EVENT DETAIL SIDEBAR (Bottom Sheet) -->
             <transition name="up">
@@ -891,16 +1033,26 @@ const toggleTheme = () => {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
     >
-        <div v-if="showToast && toastEvent" class="fixed top-4 left-4 right-4 z-50 bg-gray-900 border border-primary text-white p-4 rounded-2xl shadow-2xl flex items-center gap-4 cursor-pointer" @click="scrollToEvent(toastEvent.id)">
-            <div class="bg-primary/20 p-2 rounded-full">
-                <MapPin class="w-6 h-6 text-primary" />
+        <div v-if="showToast && toastEvent" class="fixed top-4 left-4 right-4 z-50 bg-gray-900 border border-primary text-white p-4 rounded-2xl shadow-2xl pointer-events-auto">
+            <div class="flex items-start gap-3 mb-3">
+                <div class="bg-primary/20 p-2 rounded-full shrink-0">
+                    <MapPin class="w-5 h-5 text-primary" />
+                </div>
+                <div class="flex-1">
+                    <p class="text-xs text-gray-400 mb-1">À proximité ({{ getDistanceFromLatLonInKm(coords.latitude, coords.longitude, toastEvent.coords.lat, toastEvent.coords.lng).toFixed(1) }} km)</p>
+                    <p class="font-bold text-sm leading-tight">"{{ toastEvent.title }}" commence bientôt !</p>
+                </div>
+                <button @click="showToast = false" class="text-gray-500 hover:text-white shrink-0 -mt-1">
+                    <X class="w-4 h-4" />
+                </button>
             </div>
-            <div class="flex-1">
-                <p class="text-xs text-gray-400">À proximité ({{ getDistanceFromLatLonInKm(coords.latitude, coords.longitude, toastEvent.coords.lat, toastEvent.coords.lng).toFixed(1) }} km)</p>
-                <p class="font-bold text-sm">"{{ toastEvent.title }}" commence bientôt !</p>
-                <p class="text-xs text-primary font-bold">J'y vais ? 👉</p>
-            </div>
-            <button @click.stop="showToast = false" class="text-gray-500 hover:text-white">✕</button>
+            <button
+                @click="scrollToEvent(toastEvent.id)"
+                class="w-full bg-primary text-black font-bold py-2.5 px-4 rounded-xl hover:bg-primary/90 transition active:scale-95 flex items-center justify-center gap-2"
+            >
+                <Heart class="w-4 h-4" />
+                <span>J'y vais ! 🎉</span>
+            </button>
         </div>
     </Transition>
 
