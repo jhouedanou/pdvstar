@@ -117,3 +117,62 @@ Résultat :
 **Version** : 1.0.0
 **Date** : $(date +%Y-%m-%d)
 **Status** : ✅ Production Ready
+
+---
+
+## 🗺️ Modale Google Maps Interactive
+
+### Nouvelle fonctionnalité
+Au lieu d'ouvrir Google Maps dans une nouvelle fenêtre, le bouton "Map" du feed ouvre maintenant une **modale élégante** avec carte intégrée.
+
+### Caractéristiques
+
+**1. Interface moderne**
+- Modale plein écran responsive (80vh sur desktop)
+- Thème clair/sombre adaptatif
+- Animation d'entrée/sortie fluide
+- Design professionnel avec header et footer
+
+**2. Carte OpenStreetMap intégrée**
+- **Pas de clé API requise** (utilise OpenStreetMap)
+- Marqueur automatique sur la position de l'événement
+- Zoom optimal (15) pour voir les détails du quartier
+- Fallback élégant si pas de coordonnées GPS
+
+**3. Actions disponibles**
+- 📍 **Ouvrir dans Google Maps** : Lance l'app/site Google Maps
+- 📱 **Envoyer sur WhatsApp** : Partage l'itinéraire par WhatsApp
+- ✕ **Fermer** : Bouton de fermeture (mobile)
+
+**4. Responsive**
+- Desktop : Boutons côte à côte avec texte complet
+- Mobile : Boutons empilés avec texte court + bouton fermer
+
+### Utilisation
+
+1. Dans le feed, cliquer sur l'icône 📍 **Map** à côté d'un événement
+2. La modale s'ouvre avec la carte OSM centrée sur l'événement
+3. Options disponibles :
+   - Voir la carte interactive dans la modale
+   - Ouvrir Google Maps pour la navigation
+   - Partager l'itinéraire sur WhatsApp
+
+### Avantages
+
+✅ **Aucune clé API** nécessaire (OpenStreetMap gratuit)
+✅ **Expérience fluide** : Pas de changement d'onglet
+✅ **Léger** : Chargement rapide de l'iframe OSM
+✅ **Offline-ready** : Les tuiles sont mises en cache (PWA)
+✅ **Mobile-first** : Design adapté aux petits écrans
+
+### Fichiers modifiés
+- `src/views/FeedUser.vue` : 
+  - Fonction `openMap()` modifiée
+  - Ajout de `showGoogleMapsModal` et `googleMapsLocation`
+  - Nouvelle modale avec iframe OSM
+  - Boutons d'action responsive
+
+---
+
+**Dernière mise à jour** : $(date +%Y-%m-%d)
+**Build** : ✅ 359.66 KiB | PWA Ready

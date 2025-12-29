@@ -218,6 +218,8 @@ const showSearch = ref(false)
 const showProfile = ref(false)
 const selectedMapEvent = ref(null) // Event selected on map
 const selectedOrganizer = ref(null) // For Organizer Profile Modal
+const showGoogleMapsModal = ref(false)
+const googleMapsLocation = ref('')
 
 const openOrganizerProfile = (name) => {
     selectedOrganizer.value = name
@@ -531,10 +533,16 @@ const sendItineraryWhatsApp = async (event) => {
     }
 }
 
-const openMap = (location) => {
-    // Open Google Maps with the location query
-    const query = encodeURIComponent(location)
-    window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank')
+const openMap = (location, event = null) => {
+    // Open Google Maps in modal instead of new window
+    googleMapsLocation.value = location
+
+    // If event is provided, set it as selected for potential use
+    if (event) {
+        selectedMapEvent.value = event
+    }
+
+    showGoogleMapsModal.value = true
 }
 
 const handleShare = async (event) => {
@@ -640,7 +648,7 @@ const toggleTheme = () => {
               <span class="text-[10px] font-bold">{{ item.data.participantCount }}</span>
             </button>
 
-            <button @click="openMap(item.data.location)" class="action-button flex flex-col items-center gap-1 group">
+            <button @click="openMap(item.data.location, item.data)" class="action-button flex flex-col items-center gap-1 group">
               <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
                  <MapPin class="w-6 h-6 text-white"/>
               </div>
@@ -1055,6 +1063,74 @@ const toggleTheme = () => {
             </button>
         </div>
     </Transition>
+
+    <!-- Google Maps Modal -->
+    <transition name="fade">
+        <div v-if="showGoogleMapsModal" class="fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+                <!-- Header -->
+                <div class="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900 dark:text-white">Itinéraire</h2>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ googleMapsLocation }}</p>
+                    </div>
+                    <button
+                        @click="showGoogleMapsModal = false"
+                        class="bg-gray-100 dark:bg-gray-800 p-2 rounded-full text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                    >
+                        <X class="w-6 h-6" />
+                    </button>
+                </div>
+
+                <!-- Maps Embed -->
+                <div class="flex-1 relative bg-gray-100 dark:bg-gray-800">
+                    <!-- OpenStreetMap Embed (No API key required) -->
+                    <iframe
+                        v-if="selectedMapEvent?.coords"
+                        :src="`https://www.openstreetmap.org/export/embed.html?bbox=${selectedMapEvent.coords.lng - 0.01},${selectedMapEvent.coords.lat - 0.01},${selectedMapEvent.coords.lng + 0.01},${selectedMapEvent.coords.lat + 0.01}&layer=mapnik&marker=${selectedMapEvent.coords.lat},${selectedMapEvent.coords.lng}`"
+                        class="w-full h-full border-0"
+                        allowfullscreen
+                        loading="lazy"
+                    ></iframe>
+                    <!-- Fallback for events without coordinates -->
+                    <div v-else class="w-full h-full flex items-center justify-center">
+                        <div class="text-center p-6">
+                            <MapPin class="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                            <p class="text-gray-600 dark:text-gray-400 font-semibold mb-2">{{ googleMapsLocation }}</p>
+                            <p class="text-sm text-gray-500 dark:text-gray-500">Coordonnées GPS non disponibles</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer Actions -->
+                <div class="p-4 border-t border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row gap-3">
+                    <button
+                        @click="window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(googleMapsLocation)}`, '_blank')"
+                        class="flex-1 bg-primary text-black font-bold py-3 px-4 rounded-xl hover:bg-primary/90 transition active:scale-95 flex items-center justify-center gap-2"
+                    >
+                        <MapIcon class="w-5 h-5" />
+                        <span class="hidden sm:inline">Ouvrir dans Google Maps</span>
+                        <span class="sm:hidden">Google Maps</span>
+                    </button>
+                    <button
+                        v-if="selectedMapEvent && userStore.user?.phone"
+                        @click="sendItineraryWhatsApp(selectedMapEvent); showGoogleMapsModal = false"
+                        class="flex-1 bg-green-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-700 transition active:scale-95 flex items-center justify-center gap-2"
+                    >
+                        <span>📱</span>
+                        <span class="hidden sm:inline">Envoyer sur WhatsApp</span>
+                        <span class="sm:hidden">WhatsApp</span>
+                    </button>
+                    <button
+                        @click="showGoogleMapsModal = false"
+                        class="sm:hidden bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 px-4 rounded-xl hover:bg-gray-300 dark:hover:bg-gray-600 transition active:scale-95"
+                    >
+                        Fermer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </transition>
 
   </div>
 </template>
