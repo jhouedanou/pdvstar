@@ -46,7 +46,7 @@ export const sendWhatsAppMessage = async (phoneNumber, message) => {
 
     // Clean Ivorian phone numbers (remove 0 after +225)
     const cleanedPhoneNumber = cleanIvorianPhoneNumber(phoneNumber)
-    
+
     // Remove '+' and any spaces from phone number for API
     const cleanPhone = cleanedPhoneNumber.replace(/[^\d]/g, '')
 
@@ -107,10 +107,10 @@ Vous recevrez plus d'informations prochainement. À bientôt! 🎊`
     try {
         // Send to organizer (using user's phone as organizer for now)
         const organizerResult = await sendWhatsAppMessage(userPhone, organizerMessage)
-        
+
         // Send confirmation to user
         const userResult = await sendWhatsAppMessage(userPhone, userConfirmationMessage)
-        
+
         return {
             success: true,
             organizerMessage: organizerResult,
@@ -134,4 +134,57 @@ export const formatEventNotificationMessage = (event, userName, userPhone) => {
 👤 Nom: ${userName}
 📱 Téléphone: ${userPhone}
 ⏰ ${new Date().toLocaleString('fr-FR')}`
+}
+/**
+ * Send location via GreenAPI
+ * @param {string} phoneNumber - Recipient phone number
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @param {string} name - Name of location
+ * @param {string} address - Address of location
+ * @returns {Promise<Object>} API response
+ */
+export const sendWhatsAppLocation = async (phoneNumber, lat, lng, name, address) => {
+    const config = getGreenApiConfig()
+
+    // Validate inputs
+    if (!phoneNumber || !lat || !lng) {
+        throw new Error('Phone number, latitude, and longitude are required')
+    }
+
+    // Clean phone number
+    const cleanedPhoneNumber = cleanIvorianPhoneNumber(phoneNumber)
+    const cleanPhone = cleanedPhoneNumber.replace(/[^\d]/g, '')
+
+    try {
+        const endpoint = `${config.apiUrl}/waInstance${config.idInstance}/sendLocation/${config.apiToken}`
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                chatId: `${cleanPhone}@c.us`,
+                latitude: lat,
+                longitude: lng,
+                nameLocation: name || 'Localisation',
+                addressLocation: address || ''
+            })
+        })
+
+        if (!response.ok) {
+            const errorData = await response.json()
+            throw new Error(`GreenAPI Error: ${errorData.message || response.statusText}`)
+        }
+
+        const data = await response.json()
+        return {
+            success: true,
+            messageId: data.idMessage
+        }
+    } catch (error) {
+        console.error('WhatsApp location sending failed:', error)
+        throw error
+    }
 }

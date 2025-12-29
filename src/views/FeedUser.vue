@@ -6,7 +6,7 @@ import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, P
 import UserProfileModal from '../components/UserProfileModal.vue'
 import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
-import { sendEventNotification } from '../services/greenApiService'
+import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -87,11 +87,16 @@ watch(showMap, async (isOpen) => {
     if (isOpen) {
         await nextTick()
         initMap()
+    } else {
+        if (mapInstance) {
+            mapInstance.remove()
+            mapInstance = null
+        }
     }
 })
 
 const initMap = () => {
-    if (mapInstance) return // Already initialized
+    if (mapInstance) mapInstance.remove() // Safety cleanup
 
     // Center on Abidjan (Marcory)
     mapInstance = L.map(mapContainer.value).setView([5.30966, -3.97449], 14)
@@ -150,20 +155,69 @@ const handleJyVais = async (event) => {
         return
     }
 
-    // Toggle registration state locally for the prototype
+    // Toggle registration state persistent
     if (!event.isRegistered) {
-        event.isRegistered = true
-        event.participantCount++
-        messageSuccess.value = `✅ Inscription confirmée pour "${event.title}"!`
+        eventStore.updateEvent(event.id, {
+            isRegistered: true,
+            participantCount: event.participantCount + 1
+        })
+        messageSuccess.value = `✅ Inscription confirmée !`
+        
+        // Send WhatsApp Notification
+        if (userStore.user && userStore.user.phone) {
+            sendingMessage.value = true
+            try {
+                // Determine user name
+                const userName = userStore.user.name || 'Utilisateur'
+                await sendEventNotification(event, userName, userStore.user.phone)
+                messageSuccess.value = `✅ Inscription confirmée ! Notification envoyée 📱`
+            } catch (err) {
+                console.error('Notification failed', err)
+                // Don't block UI for this, but maybe show warning?
+            } finally {
+                sendingMessage.value = false
+            }
+        }
+        
     } else {
-        // Option to unregister if needed, or just show already registered
-        messageSuccess.value = `Vous êtes déjà inscrit !`
+        // Toggle off
+        eventStore.updateEvent(event.id, {
+            isRegistered: false,
+            participantCount: Math.max(0, event.participantCount - 1)
+        })
+        messageSuccess.value = `Inscription annulée.`
     }
     
     // Clear success message after 3 seconds
     setTimeout(() => {
         messageSuccess.value = ''
     }, 3000)
+}
+
+const handleItinerary = async (event) => {
+    if (!userStore.user || !userStore.user.phone) {
+        showProfileModal.value = true
+        return
+    }
+
+    messageSuccess.value = 'Envoi de l\'itinéraire sur WhatsApp...'
+    
+    try {
+        await sendWhatsAppLocation(
+            userStore.user.phone,
+            event.coords.lat,
+            event.coords.lng,
+            event.title,
+            event.location
+        )
+        messageSuccess.value = '✅ Itinéraire envoyé sur WhatsApp ! 🗺️'
+    } catch (err) {
+        console.error('Failed to send location', err)
+        messageError.value = 'Erreur lors de l\'envoi de l\'itinéraire.'
+        setTimeout(() => messageError.value = '', 3000)
+    } finally {
+        setTimeout(() => messageSuccess.value = '', 3000)
+    }
 }
 
 const openMap = (location) => {
@@ -376,11 +430,11 @@ const toggleTheme = () => {
                             </button>
 
                             <button 
-                                @click="openMap(selectedMapEvent.location)"
+                                @click="handleItinerary(selectedMapEvent)"
                                 class="flex items-center justify-center gap-2 py-3 rounded-xl bg-gray-700 text-white font-bold hover:bg-gray-600 transition active:scale-95"
                             >
                                 <MapIcon class="w-5 h-5" />
-                                Itinéraire
+                                Itinéraire (WhatsApp)
                             </button>
                         </div>
                     </div>

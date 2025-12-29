@@ -1,52 +1,62 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { db } from '../services/db'
 
 export const useUserStore = defineStore('user', () => {
-    // Load from localStorage or initialize
-    const loadUserFromStorage = () => {
-        const stored = localStorage.getItem('pdvstar_user')
+    // Load current session from localStorage (pointer to logged in user)
+    const loadSession = () => {
+        const stored = localStorage.getItem('pdvstar_session_user')
         return stored ? JSON.parse(stored) : null
     }
 
-    const user = ref(loadUserFromStorage())
-    
+    const user = ref(loadSession())
+
     const isProfileComplete = computed(() => {
         return user.value && user.value.name && user.value.phone
     })
 
-    const createProfile = (profileData) => {
-        user.value = {
-            id: Math.random().toString(36).substr(2, 9),
-            name: profileData.name,
-            phone: profileData.phone || '+22545029721',
-            email: profileData.email || '',
-            createdAt: new Date().toISOString()
+    // This now acts as Login OR Register
+    const authenticate = (profileData) => {
+        let existingUser = db.findUserByPhone(profileData.phone)
+
+        if (existingUser) {
+            // Login
+            user.value = existingUser
+        } else {
+            // Register
+            user.value = db.createUser({
+                name: profileData.name || `Utilisateur ${profileData.phone}`,
+                phone: profileData.phone,
+                email: profileData.email || '',
+                role: 'user'
+            })
         }
-        // Save to localStorage
-        localStorage.setItem('pdvstar_user', JSON.stringify(user.value))
+
+        // Save session
+        localStorage.setItem('pdvstar_session_user', JSON.stringify(user.value))
         return user.value
     }
 
     const updateProfile = (updates) => {
         if (user.value) {
-            user.value = {
-                ...user.value,
-                ...updates
+            const updated = db.updateUser(user.value.id, updates)
+            if (updated) {
+                user.value = updated
+                localStorage.setItem('pdvstar_session_user', JSON.stringify(updated))
             }
-            localStorage.setItem('pdvstar_user', JSON.stringify(user.value))
         }
     }
 
-    const clearProfile = () => {
+    const logout = () => {
         user.value = null
-        localStorage.removeItem('pdvstar_user')
+        localStorage.removeItem('pdvstar_session_user')
     }
 
     return {
         user,
         isProfileComplete,
-        createProfile,
+        authenticate,
         updateProfile,
-        clearProfile
+        logout
     }
 })

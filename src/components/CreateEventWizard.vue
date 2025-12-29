@@ -23,8 +23,13 @@ const handleFileChange = (e) => {
   const file = e.target.files[0]
   if (file) {
     mediaFile.value = file
-    mediaPreview.value = URL.createObjectURL(file)
-    step.value = 2 // Auto advance
+    // Convert to Base64 for persistence
+    const reader = new FileReader()
+    reader.onload = (e) => {
+        mediaPreview.value = e.target.result
+        step.value = 2 // Auto advance
+    }
+    reader.readAsDataURL(file)
   }
 }
 
@@ -74,11 +79,21 @@ const currentLocationConfig = computed(() => {
 })
 
 const publishEvent = () => {
+    // Determine title from transcription or default
+    let title = "Nouvel Événement"
+    if (transcription.value.length < 50) {
+        title = transcription.value
+    }
+
     store.addEvent({
-        title: "Nouvel Événement (IA)", // In real app, extracted from transcription
-        description: transcription.value,
-        image: mediaPreview.value,
-        location: 'Ma Position Actuelle',
+        title: title,
+        description: transcription.value || 'Pas de description',
+        image: mediaPreview.value, // Now Base64
+        location: 'Ma Position (Mobile)',
+        coords: {
+            lat: coords.value.latitude !== Infinity ? coords.value.latitude : 5.30966,
+            lng: coords.value.longitude !== Infinity ? coords.value.longitude : -3.97449
+        },
         distance: '0 km'
     })
     router.push('/')

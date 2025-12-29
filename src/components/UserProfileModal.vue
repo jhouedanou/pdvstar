@@ -57,8 +57,9 @@ const handleSubmit = async () => {
     isLoading.value = true
     try {
         // Mock simple auth - in production this would verify OTP
-        userStore.createProfile({
-            name: `Utilisateur ${formData.value.phone}`, // Auto-generate name
+        // Login or Register
+        userStore.authenticate({
+            name: `Utilisateur ${formData.value.phone}`, // Auto-generate name/handle in store
             phone: formData.value.phone,
             email: ''
         })
