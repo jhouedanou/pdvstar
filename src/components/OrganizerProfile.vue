@@ -61,7 +61,6 @@ const formatDate = (dateStr) => {
     return date.toLocaleDateString('fr-FR', options)
 }
 </script>
-</script>
 
 <template>
     <div class="fixed inset-0 bg-white dark:bg-black z-[60] flex flex-col overflow-y-auto transition-colors duration-300">

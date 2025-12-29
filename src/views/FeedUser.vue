@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useGeolocation } from '@vueuse/core'
@@ -99,6 +99,51 @@ const scrollToEvent = (id) => {
     // activeTab.value = 'feed'
 }
 
+// Wheel scroll handling for feed
+const feedContainer = ref(null)
+let isScrolling = false
+let scrollTimeout = null
+
+const handleWheel = (e) => {
+    if (!feedContainer.value) return
+    
+    // Prevent default scroll behavior
+    e.preventDefault()
+    
+    // Clear previous timeout
+    if (scrollTimeout) {
+        clearTimeout(scrollTimeout)
+    }
+    
+    // Avoid multiple rapid scrolls
+    if (isScrolling) return
+    
+    const delta = e.deltaY
+    const threshold = 50 // Sensitivity threshold
+    
+    if (Math.abs(delta) > threshold) {
+        isScrolling = true
+        
+        // Scroll to next/previous slide
+        const container = feedContainer.value
+        const slideHeight = container.clientHeight
+        const currentScroll = container.scrollTop
+        const direction = delta > 0 ? 1 : -1
+        const targetScroll = currentScroll + (slideHeight * direction)
+        
+        // Smooth scroll to target
+        container.scrollTo({
+            top: targetScroll,
+            behavior: 'smooth'
+        })
+        
+        // Reset scrolling flag after animation
+        setTimeout(() => {
+            isScrolling = false
+        }, 800)
+    }
+}
+
 onMounted(() => {
     // Show profile modal if user doesn't have a profile
     if (!userStore.isProfileComplete) {
@@ -117,6 +162,18 @@ onMounted(() => {
                 unwatch()
             }
         })
+    }
+    
+    // Add wheel event listener for mouse/trackpad scroll
+    if (feedContainer.value) {
+        feedContainer.value.addEventListener('wheel', handleWheel, { passive: false })
+    }
+})
+
+onUnmounted(() => {
+    // Clean up event listener
+    if (feedContainer.value) {
+        feedContainer.value.removeEventListener('wheel', handleWheel)
     }
 })
 
@@ -218,8 +275,10 @@ const initMap = () => {
     }).addTo(mapInstance)
 
     // Add Markers from Store
+    let markerCount = 0
     eventStore.events.forEach(event => {
         if (event.coords) {
+            markerCount++
             const marker = L.marker([event.coords.lat, event.coords.lng]).addTo(mapInstance)
             
             // Custom Popup
@@ -234,6 +293,8 @@ const initMap = () => {
             marker.bindPopup(popupContent)
         }
     })
+    
+    console.log(`📍 ${markerCount} événements affichés sur la carte sur ${eventStore.events.length} total`)
 }
 
 
@@ -408,7 +469,7 @@ const toggleTheme = () => {
     </div>
 
     <!-- MAIN FEED VIEW -->
-    <div class="feed-container snap-y snap-mandatory h-full w-full overflow-y-scroll scroll-smooth no-scrollbar">
+    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-full w-full overflow-y-scroll scroll-smooth no-scrollbar">
       <template v-for="item in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
         <!-- AD SLIDE -->
         <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
@@ -664,13 +725,26 @@ const toggleTheme = () => {
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4 pb-20">
-                    <div v-for="event in (searchQuery ? filteredEvents : eventStore.events)" :key="event.id" 
+                    <div v-for="event in (searchQuery || showPremiumOnly ? filteredEvents : eventStore.events)" :key="event.id" 
                          @click="handleSearchSelect(event)"
-                         class="bg-white dark:bg-gray-800 rounded-lg overflow-hidden active:scale-95 transition cursor-pointer shadow-md dark:shadow-none">
-                        <img :src="event.image" class="w-full h-32 object-cover">
+                         class="bg-white dark:bg-gray-800 rounded-lg overflow-hidden active:scale-95 transition cursor-pointer shadow-md dark:shadow-none relative">
+                        <div class="relative">
+                            <img :src="event.image" class="w-full h-32 object-cover">
+                            <!-- Premium Badge on Image -->
+                            <div v-if="event.isPremium" class="absolute top-2 right-2">
+                                <div class="bg-gradient-to-r from-yellow-400 to-amber-500 p-1 rounded-full shadow-lg">
+                                    <Crown class="w-3 h-3 text-black" />
+                                </div>
+                            </div>
+                        </div>
                         <div class="p-2">
-                            <h3 class="font-bold text-sm truncate text-gray-900 dark:text-white">{{ event.title }}</h3>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ event.date.split('T')[0] }}</p>
+                            <div class="flex items-center gap-1 mb-1">
+                                <h3 class="font-bold text-sm truncate text-gray-900 dark:text-white flex-1">{{ event.title }}</h3>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ new Date(event.date).toLocaleDateString('fr-FR') }}</p>
+                            <div v-if="event.isPremium" class="text-xs font-bold text-amber-500">
+                                {{ event.price?.toLocaleString() }} CFA
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -735,7 +809,7 @@ const toggleTheme = () => {
         </div>
     </transition>
     
-    <!-- Simple Bottom Navigation (Home, Recherche, Profil) -->
+    <!-- Simple Bottom Navigation (Home, Recherche, Carte, Profil) -->
     <div class="bottom-nav fixed bottom-0 w-full z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around items-center h-16 border-t border-gray-200 dark:border-white/10 safe-area-bottom transition-colors duration-300">
         <button 
             @click="activeTab = 'feed'"
@@ -753,6 +827,15 @@ const toggleTheme = () => {
         >
            <Search class="w-6 h-6" />
            <span class="text-[10px] font-bold">Recherche</span>
+        </button>
+
+        <button 
+            @click="activeTab = 'map'"
+            class="flex flex-col items-center gap-1 transition"
+            :class="showMap ? 'opacity-100 text-primary scale-110' : 'opacity-40 hover:opacity-100'"
+        >
+           <MapIcon class="w-6 h-6" />
+           <span class="text-[10px] font-bold">Carte</span>
         </button>
 
         <button 
