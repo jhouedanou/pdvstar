@@ -5,6 +5,7 @@ import { useUserStore } from '../stores/userStore'
 import { useGeolocation } from '@vueuse/core'
 import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon } from 'lucide-vue-next'
 import UserProfileModal from '../components/UserProfileModal.vue'
+import OrganizerProfile from '../components/OrganizerProfile.vue'
 import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
 import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
@@ -103,6 +104,11 @@ const showMap = ref(false)
 const showSearch = ref(false)
 const showProfile = ref(false)
 const selectedMapEvent = ref(null) // Event selected on map
+const selectedOrganizer = ref(null) // For Organizer Profile Modal
+
+const openOrganizerProfile = (name) => {
+    selectedOrganizer.value = name
+}
 
 const activeTab = computed({
     get: () => {
@@ -309,6 +315,25 @@ const openMap = (location) => {
     window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank')
 }
 
+const handleShare = async (event) => {
+    try {
+        if (navigator.share) {
+            await navigator.share({
+                title: event.title,
+                text: `Viens on va là-bas : ${event.title} à ${event.location} ! 🚀 #BabiVibes`,
+                url: window.location.href
+            })
+        } else {
+            // Fallback
+            await navigator.clipboard.writeText(`Viens on va là-bas : ${event.title} à ${event.location} ! 🚀`)
+            messageSuccess.value = "Lien copié !"
+            setTimeout(() => messageSuccess.value = '', 3000)
+        }
+    } catch (err) {
+        console.log('Share canceled', err)
+    }
+}
+
 // --- Theme Logic ---
 const isDarkMode = ref(true)
 const toggleTheme = () => {
@@ -357,7 +382,7 @@ const toggleTheme = () => {
         <!-- Right Side Actions (Floating properly aligned) -->
         <div class="action-buttons absolute right-2 bottom-24 flex flex-col gap-6 z-20 items-center">
            <!-- Profile/Organizer Avatar (TikTok style) -->
-           <div class="relative mb-2">
+           <div class="relative mb-2 cursor-pointer" @click="openOrganizerProfile(event.organizer)">
              <div class="w-12 h-12 rounded-full border-2 border-primary overflow-hidden p-0.5">
                <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${event.organizer}`" class="w-full h-full rounded-full bg-white" />
              </div>
@@ -388,7 +413,7 @@ const toggleTheme = () => {
               <span class="action-button-text text-xs font-semibold drop-shadow-md">Map</span>
             </button>
 
-           <button class="action-button flex flex-col items-center gap-1 group">
+           <button @click="handleShare(event)" class="action-button flex flex-col items-center gap-1 group">
              <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
                 <Share2 class="w-6 h-6 text-white"/>
              </div>
@@ -661,6 +686,15 @@ const toggleTheme = () => {
 
     <!-- User Profile Modal -->
     <UserProfileModal v-if="showProfileModal" @profile-created="handleProfileCreated" />
+
+    <!-- Organizer Profile Modal -->
+    <transition name="up">
+        <OrganizerProfile 
+            v-if="selectedOrganizer" 
+            :organizer-name="selectedOrganizer" 
+            @close="selectedOrganizer = null" 
+        />
+    </transition>
     
     <!-- Rotate Device Message (Optional - uncomment to enable) -->
     <!-- <RotateDeviceMessage /> -->

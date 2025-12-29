@@ -38,19 +38,44 @@ export const useUserStore = defineStore('user', () => {
                 name: profileData.name || `Utilisateur ${profileData.phone}`,
                 phone: profileData.phone,
                 email: profileData.email || '',
+                avatar: profileData.avatar || null,
+                avatar: profileData.avatar || null,
+                following: [],
                 role: 'user'
             })
         }
 
         user.value = currentUser
+        saveSession()
+        return user.value
+    }
 
-        // Save session with Expiry (7 Days)
+    const toggleFollow = (organizerName) => {
+        if (!user.value) return
+
+        if (!user.value.following) {
+            user.value.following = []
+        }
+
+        const idx = user.value.following.indexOf(organizerName)
+        if (idx === -1) {
+            user.value.following.push(organizerName)
+        } else {
+            user.value.following.splice(idx, 1)
+        }
+
+        // Persist
+        db.updateUser(user.value.id, { following: user.value.following })
+        saveSession()
+    }
+
+    // Internal helper
+    const saveSession = () => {
         const session = {
             user: user.value,
             expiry: Date.now() + (7 * 24 * 60 * 60 * 1000) // 1 Week
         }
         localStorage.setItem('pdvstar_session_user', JSON.stringify(session))
-        return user.value
     }
 
     const updateProfile = (updates) => {
