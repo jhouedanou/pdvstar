@@ -239,12 +239,27 @@ const initMap = () => {
 
 // --- Search Logic ---
 const searchQuery = ref('')
+const showPremiumOnly = ref(false)
+
 const filteredEvents = computed(() => {
-    if (!searchQuery.value) return []
-    return eventStore.events.filter(e => 
-        e.title.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
-        e.description.toLowerCase().includes(searchQuery.value.toLowerCase())
-    )
+    let results = eventStore.events
+    
+    // Filter by premium if toggle is on
+    if (showPremiumOnly.value) {
+        results = results.filter(e => e.isPremium)
+    }
+    
+    // Filter by search query
+    if (searchQuery.value) {
+        results = results.filter(e => 
+            e.title.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+            e.description.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+            e.location.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+            e.organizer.toLowerCase().includes(searchQuery.value.toLowerCase())
+        )
+    }
+    
+    return results
 })
 
 const handleSearchSelect = (event) => {
@@ -618,7 +633,7 @@ const toggleTheme = () => {
                 <button @click="showSearch = false" class="text-gray-900 dark:text-white p-2"><X class="w-7 h-7" /></button>
             </div>
 
-            <div class="relative mb-6">
+            <div class="relative mb-4">
                 <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input 
                     v-model="searchQuery" 
@@ -629,9 +644,23 @@ const toggleTheme = () => {
                 >
             </div>
 
+            <!-- Premium Filter Toggle -->
+            <div class="mb-6">
+                <button 
+                    @click="showPremiumOnly = !showPremiumOnly"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all"
+                    :class="showPremiumOnly 
+                        ? 'bg-gradient-to-r from-yellow-400 to-amber-500 text-black shadow-lg' 
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'"
+                >
+                    <Crown class="w-4 h-4" />
+                    <span>{{ showPremiumOnly ? 'Tous les événements' : 'Événements Premium uniquement' }}</span>
+                </button>
+            </div>
+
             <div class="flex-1 overflow-y-auto">
-                <div v-if="searchQuery && filteredEvents.length === 0" class="text-center text-gray-500 mt-10">
-                    Aucun résultat trouvé 😢
+                <div v-if="filteredEvents.length === 0" class="text-center text-gray-500 mt-10">
+                    {{ searchQuery ? 'Aucun résultat trouvé 😢' : 'Commencez à taper pour rechercher...' }}
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4 pb-20">
