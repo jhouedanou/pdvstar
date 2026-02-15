@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAdminStore } from '../stores/adminStore'
 import { useEventStore } from '../stores/eventStore'
-import { db } from '../services/db'
 import { 
     LogOut, Plus, Edit, Trash2, Calendar, MapPin, 
     X, Check, Camera, Save, ArrowLeft 
@@ -134,10 +133,7 @@ const cancelDelete = () => {
 }
 
 const deleteEvent = (eventId) => {
-    // Remove from db directly and refresh
-    const events = db.events.value.filter(e => e.id !== eventId)
-    db.events.value = events
-    eventStore.refreshEvents()
+    eventStore.deleteEvent(eventId)
     deleteConfirmId.value = null
 }
 

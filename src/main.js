@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { createRouter, createWebHistory } from 'vue-router'
 import './style.css'
 import App from './App.vue'
+import { checkAdminSession } from './stores/adminStore'
 
 // Basic Routes Placeholder
 import ProDashboard from './views/ProDashboard.vue'
@@ -27,17 +28,12 @@ const router = createRouter({
 // Navigation guard for admin routes
 router.beforeEach((to, from, next) => {
     if (to.meta.requiresAdmin) {
-        const stored = localStorage.getItem('pdvstar_admin_session')
-        if (stored) {
-            const session = JSON.parse(stored)
-            // Check if authenticated and not expired
-            if (session.isAuthenticated && session.expiry && Date.now() <= session.expiry) {
-                next()
-                return
-            }
+        if (checkAdminSession()) {
+            next()
+        } else {
+            // Redirect to admin login if not authenticated
+            next('/admin')
         }
-        // Redirect to admin login if not authenticated
-        next('/admin')
     } else {
         next()
     }

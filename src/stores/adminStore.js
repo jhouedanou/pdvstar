@@ -1,8 +1,22 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+// Static helper function for checking session validity (used by route guards)
+export const checkAdminSession = () => {
+    const stored = localStorage.getItem('pdvstar_admin_session')
+    if (stored) {
+        const session = JSON.parse(stored)
+        // Check if authenticated and not expired
+        if (session.isAuthenticated && session.expiry && Date.now() <= session.expiry) {
+            return true
+        }
+    }
+    return false
+}
+
 export const useAdminStore = defineStore('admin', () => {
-    // Admin credentials (hardcoded as per requirement)
+    // Admin credentials - Note: Hardcoded as per requirement (login: admin, password: admin)
+    // In production, this should use environment variables and proper backend authentication
     const ADMIN_USERNAME = 'admin'
     const ADMIN_PASSWORD = 'admin'
 
