@@ -24,6 +24,12 @@ export const useEventStore = defineStore('events', () => {
         }
     }
 
+    const deleteEvent = (id) => {
+        const events_data = db.events.value.filter(e => e.id !== id)
+        db.events.value = events_data
+        events.value = db.getEvents()
+    }
+
     const refreshEvents = () => {
         events.value = db.getEvents()
     }
@@ -32,6 +38,7 @@ export const useEventStore = defineStore('events', () => {
         events,
         addEvent,
         updateEvent,
+        deleteEvent,
         refreshEvents
     }
 })
