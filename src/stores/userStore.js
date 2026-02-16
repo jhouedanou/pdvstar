@@ -4,7 +4,11 @@ import { db } from '../services/db'
 import {
     findUserByPhone as supaFindUserByPhone,
     createUser as supaCreateUser,
-    updateUser as supaUpdateUser
+    updateUser as supaUpdateUser,
+    getActivePass as supaGetActivePass,
+    purchasePass as supaPurchasePass,
+    getUserPasses as supaGetUserPasses,
+    PASS_CATALOG
 } from '../services/supabase'
 
 export const useUserStore = defineStore('user', () => {
@@ -25,6 +29,98 @@ export const useUserStore = defineStore('user', () => {
 
     const user = ref(loadSession())
     const isLoading = ref(false)
+
+    // ====== Passes d'accès ======
+    const activePass = ref(null)
+    const passHistory = ref([])
+    const isLoadingPass = ref(false)
+
+    const hasActivePass = computed(() => {
+        if (!activePass.value) return false
+        return new Date(activePass.value.expiresAt) > new Date()
+    })
+
+    const activePassInfo = computed(() => {
+        if (!hasActivePass.value) return null
+        const catalog = PASS_CATALOG[activePass.value.passType]
+        if (!catalog) return null
+        const expiresAt = new Date(activePass.value.expiresAt)
+        const now = new Date()
+        const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24))
+        return {
+            ...catalog,
+            ...activePass.value,
+            daysLeft,
+            expiresFormatted: expiresAt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+        }
+    })
+
+    /**
+     * Charger le pass actif de l'utilisateur courant
+     */
+    const loadActivePass = async () => {
+        if (!user.value) return
+        isLoadingPass.value = true
+        try {
+            activePass.value = await supaGetActivePass(user.value.id)
+            // Charger aussi le localStorage comme fallback
+            if (!activePass.value) {
+                const stored = localStorage.getItem('pdvstar_active_pass_' + user.value.id)
+                if (stored) {
+                    const pass = JSON.parse(stored)
+                    if (new Date(pass.expiresAt) > new Date()) {
+                        activePass.value = pass
+                    } else {
+                        localStorage.removeItem('pdvstar_active_pass_' + user.value.id)
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Erreur chargement pass:', err)
+        }
+        isLoadingPass.value = false
+    }
+
+    /**
+     * Acheter un pass
+     */
+    const buyPass = async (passType, paymentMethod, paymentRef) => {
+        if (!user.value) return null
+        isLoadingPass.value = true
+        try {
+            const pass = await supaPurchasePass(user.value.id, passType, paymentMethod, paymentRef)
+            if (pass) {
+                activePass.value = pass
+                // Sauvegarder aussi en localStorage comme fallback
+                localStorage.setItem('pdvstar_active_pass_' + user.value.id, JSON.stringify(pass))
+            }
+            isLoadingPass.value = false
+            return pass
+        } catch (err) {
+            console.error('Erreur achat pass:', err)
+            isLoadingPass.value = false
+            return null
+        }
+    }
+
+    /**
+     * Charger l'historique des passes
+     */
+    const loadPassHistory = async () => {
+        if (!user.value) return
+        try {
+            passHistory.value = await supaGetUserPasses(user.value.id)
+        } catch (err) {
+            console.error('Erreur chargement historique passes:', err)
+        }
+    }
+
+    /**
+     * Vérifier si l'utilisateur peut accéder à un contenu premium
+     */
+    const canAccessPremium = computed(() => {
+        return hasActivePass.value
+    })
 
     const isProfileComplete = computed(() => {
         return user.value && user.value.name && user.value.phone
@@ -79,6 +175,8 @@ export const useUserStore = defineStore('user', () => {
         user.value = currentUser
         saveSession()
         isLoading.value = false
+        // Charger le pass actif après login
+        loadActivePass()
         return user.value
     }
 
@@ -163,7 +261,14 @@ export const useUserStore = defineStore('user', () => {
 
     const logout = () => {
         user.value = null
+        activePass.value = null
+        passHistory.value = []
         localStorage.removeItem('pdvstar_session_user')
+    }
+
+    // Si l'utilisateur est déjà connecté, charger son pass
+    if (user.value) {
+        loadActivePass()
     }
 
     return {
@@ -171,6 +276,17 @@ export const useUserStore = defineStore('user', () => {
         isLoading,
         isProfileComplete,
         isOrganizer,
+        // Passes
+        activePass,
+        passHistory,
+        isLoadingPass,
+        hasActivePass,
+        activePassInfo,
+        canAccessPremium,
+        loadActivePass,
+        buyPass,
+        loadPassHistory,
+        // Actions
         authenticate,
         updateProfile,
         toggleFollow,

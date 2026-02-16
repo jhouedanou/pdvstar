@@ -4,7 +4,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import OrganizerProfile from '../components/OrganizerProfile.vue'
@@ -35,6 +35,8 @@ const currentSlideIndex = ref(0)
 // Mute state for current event music (son activé par défaut)
 const isMuted = ref(false)
 
+const appName = 'Babi Vibes'
+
 // Splash screen : simule la première interaction pour débloquer l'autoplay audio
 const hasInteracted = ref(false)
 
@@ -63,25 +65,73 @@ const getDateDisplayText = (dateStr) => {
     return label
 }
 
+// Algo de pertinence : scoring des événements
+const computeRelevanceScore = (event) => {
+    let score = 0
+    const now = new Date()
+    const eventDate = new Date(event.date)
+    const hoursUntil = (eventDate - now) / (1000 * 60 * 60)
+
+    // 1. Proximité temporelle (événements proches = score plus élevé)
+    if (hoursUntil <= 6) score += 50       // Dans les 6h
+    else if (hoursUntil <= 24) score += 35  // Aujourd'hui
+    else if (hoursUntil <= 48) score += 20  // Demain
+    else if (hoursUntil <= 168) score += 10 // Cette semaine
+    else score += 2
+
+    // 2. Popularité (nombre d'inscrits)
+    score += Math.min((event.participantCount || 0) * 2, 30)
+
+    // 3. Événement premium (boost sponsorisé)
+    if (event.isPremium) score += 15
+
+    // 4. Proximité géographique (si géolocalisation dispo)
+    if (coords.value?.latitude && event.coords?.lat) {
+        const dist = getDistanceFromLatLonInKm(coords.value.latitude, coords.value.longitude, event.coords.lat, event.coords.lng)
+        if (dist < 5) score += 25         // < 5km
+        else if (dist < 15) score += 15   // < 15km
+        else if (dist < 50) score += 5    // < 50km
+    }
+
+    // 5. Organisateur suivi (boost de pertinence)
+    if (userStore.user?.following?.includes(event.organizer)) score += 20
+
+    // 6. Avec image ou vidéo (contenu riche)
+    if (event.image) score += 5
+    if (event.videoUrl) score += 5
+
+    // 7. Avec promo
+    if (event.promoText) score += 10
+
+    return score
+}
+
 // Mix events and ads (every 5 events, insert an ad)
 const feedItems = computed(() => {
     const items = []
     const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()) // début de journée
-    // Filtrer uniquement les events à venir (aujourd'hui inclus), triés du plus proche au plus lointain
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    // Filtrer uniquement les events à venir (aujourd'hui inclus), approuvés
     const upcomingEvents = [...eventStore.events]
         .filter(e => {
             if (!e.date) return false
+            if (e.status && e.status !== 'approved') return false
             return new Date(e.date) >= today
         })
-        .sort((a, b) => new Date(a.date) - new Date(b.date)) // plus proche d'abord
+        // Tri par score de pertinence (décroissant) puis par date (croissant) en cas d'égalité
+        .map(e => ({ ...e, _score: computeRelevanceScore(e) }))
+        .sort((a, b) => {
+            if (b._score !== a._score) return b._score - a._score
+            return new Date(a.date) - new Date(b.date)
+        })
     const adsList = ads.value
 
     upcomingEvents.forEach((event, index) => {
         items.push({ type: 'event', data: event })
 
-        // Insert ad every 5 events
-        if ((index + 1) % 5 === 0 && adsList[Math.floor(index / 5) % adsList.length]) {
+        // Insert ad every 5 events (sauf si utilisateur Premium — pas de pubs)
+        const isPremiumUser = userStore.hasActivePass && userStore.activePassInfo?.id === 'premium'
+        if (!isPremiumUser && (index + 1) % 5 === 0 && adsList[Math.floor(index / 5) % adsList.length]) {
             items.push({
                 type: 'ad',
                 data: adsList[Math.floor(index / 5) % adsList.length]
@@ -336,6 +386,46 @@ const selectedOrganizer = ref(null) // For Organizer Profile Modal
 const showGoogleMapsModal = ref(false)
 const googleMapsLocation = ref('')
 
+// --- Passes d'accès ---
+const showPassShop = ref(false)
+const selectedPassType = ref(null)
+const selectedPaymentMethod = ref(null)
+const passPurchaseStep = ref('choose') // 'choose' | 'payment' | 'confirm' | 'success'
+const passPurchaseLoading = ref(false)
+
+// Import catalogue
+import { PASS_CATALOG, PAYMENT_METHODS } from '../services/supabase'
+
+const passOptions = computed(() => Object.values(PASS_CATALOG))
+
+const selectPass = (passId) => {
+    selectedPassType.value = passId
+    passPurchaseStep.value = 'payment'
+}
+
+const selectPayment = (methodId) => {
+    selectedPaymentMethod.value = methodId
+    passPurchaseStep.value = 'confirm'
+}
+
+const confirmPassPurchase = async () => {
+    if (!selectedPassType.value || !selectedPaymentMethod.value) return
+    passPurchaseLoading.value = true
+    const ref_id = 'BV-' + Date.now().toString(36).toUpperCase()
+    const pass = await userStore.buyPass(selectedPassType.value, selectedPaymentMethod.value, ref_id)
+    passPurchaseLoading.value = false
+    if (pass) {
+        passPurchaseStep.value = 'success'
+    }
+}
+
+const closePassShop = () => {
+    showPassShop.value = false
+    selectedPassType.value = null
+    selectedPaymentMethod.value = null
+    passPurchaseStep.value = 'choose'
+}
+
 const openOrganizerProfile = (name) => {
     selectedOrganizer.value = name
 }
@@ -586,7 +676,8 @@ const filteredEvents = computed(() => {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     
     let results = eventStore.events
-        .filter(e => !!e.date && new Date(e.date) >= today) // à venir uniquement
+        .filter(e => !!e.date && new Date(e.date) >= today)
+        .filter(e => !e.status || e.status === 'approved') // modération
     
     // Filtre premium
     if (showPremiumOnly.value) {
@@ -773,6 +864,29 @@ const openMap = (location, event = null) => {
     }
 
     showGoogleMapsModal.value = true
+}
+
+// VTC Deep Links
+const openVTC = (provider) => {
+    const event = selectedMapEvent.value
+    if (!event?.coords) return
+    const lat = event.coords.lat
+    const lng = event.coords.lng
+    const label = encodeURIComponent(event.title || event.location || 'Destination')
+
+    let url = ''
+    switch (provider) {
+        case 'uber':
+            url = `https://m.uber.com/ul/?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`
+            break
+        case 'yango':
+            url = `https://yango.yandex.com/route?end-lat=${lat}&end-lon=${lng}`
+            break
+        case 'waze':
+            url = `https://waze.com/ul?ll=${lat},${lng}&navigate=yes&z=17`
+            break
+    }
+    if (url) window.open(url, '_blank')
 }
 
 const handleShare = async (event) => {
@@ -1050,6 +1164,23 @@ const handleDeleteEvent = async (eventId) => {
                 <Crown class="w-4 h-4" />
                 <span>PREMIUM</span>
             </div>
+        </div>
+
+        <!-- Premium Lock Overlay (si pas de pass actif) -->
+        <div v-if="item.data.isPremium && !userStore.canAccessPremium" 
+          class="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          @click="showPassShop = true">
+          <div class="text-center px-8 py-6 max-w-[280px]">
+            <div class="bg-yellow-500/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock class="w-8 h-8 text-yellow-400" />
+            </div>
+            <h3 class="text-white font-black text-lg mb-1">Contenu Premium</h3>
+            <p class="text-gray-300 text-sm mb-4">Obtenez un pass pour accéder à cet événement</p>
+            <div class="bg-gradient-to-r from-yellow-400 to-orange-500 text-black font-black px-6 py-2.5 rounded-full text-sm inline-flex items-center gap-2 shadow-lg">
+              <Ticket class="w-4 h-4" />
+              Obtenir un Pass
+            </div>
+          </div>
         </div>
         
         <!-- Right Side Actions (Floating properly aligned) -->
@@ -1573,6 +1704,51 @@ const handleDeleteEvent = async (eventId) => {
                    </div>
                  </div>
 
+                 <!-- SECTION MON PASS -->
+                 <div class="mb-6">
+                   <!-- Pass actif -->
+                   <div v-if="userStore.hasActivePass && userStore.activePassInfo" class="bg-gradient-to-br rounded-2xl p-4 mb-3 border border-white/10 shadow-lg relative overflow-hidden"
+                     :class="userStore.activePassInfo.color">
+                     <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mt-10"></div>
+                     <div class="relative z-10">
+                       <div class="flex items-center justify-between mb-3">
+                         <div class="flex items-center gap-2">
+                           <span class="text-2xl">{{ userStore.activePassInfo.emoji }}</span>
+                           <div>
+                             <h3 class="font-black text-white text-lg">Pass {{ userStore.activePassInfo.name }}</h3>
+                             <p class="text-white/70 text-xs">Expire le {{ userStore.activePassInfo.expiresFormatted }}</p>
+                           </div>
+                         </div>
+                         <div class="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full">
+                           <span class="text-white font-bold text-sm">{{ userStore.activePassInfo.daysLeft }}j restant(s)</span>
+                         </div>
+                       </div>
+                       <div class="flex flex-wrap gap-1.5">
+                         <span v-for="feat in userStore.activePassInfo.features" :key="feat" class="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full">
+                           {{ feat }}
+                         </span>
+                       </div>
+                     </div>
+                   </div>
+                   <!-- Pas de pass actif -->
+                   <div v-else @click="showPassShop = true"
+                     class="bg-gradient-to-r from-purple-600 to-pink-500 rounded-2xl p-4 text-white flex items-center justify-between shadow-lg cursor-pointer hover:scale-[1.02] transition active:scale-95">
+                     <div class="flex items-center gap-3">
+                       <div class="bg-white/20 p-2.5 rounded-xl">
+                         <Ticket class="w-6 h-6" />
+                       </div>
+                       <div>
+                         <h3 class="font-bold text-base">Obtenir un Pass</h3>
+                         <p class="text-white/70 text-xs">Accédez au contenu premium</p>
+                       </div>
+                     </div>
+                     <ChevronRight class="w-5 h-5 text-white/70" />
+                   </div>
+                   <button v-if="userStore.hasActivePass" @click="showPassShop = true" class="w-full text-center text-xs text-primary font-medium mt-2 hover:underline">
+                     Changer de pass / Renouveler
+                   </button>
+                 </div>
+
                  <!-- SECTION ORGANISATEUR -->
                  <div v-if="userStore.isOrganizer" class="mb-8">
                    <!-- Header Espace Organisateur -->
@@ -1721,11 +1897,17 @@ const handleDeleteEvent = async (eventId) => {
                         </div>
                     </div>
                  </div>
+
+                 <!-- Liens légaux -->
+                 <div class="mt-8 pt-4 border-t border-gray-200 dark:border-gray-800 text-center space-y-2">
+                   <button @click="router.push('/legal?tab=cgu')" class="text-xs text-gray-400 hover:text-primary transition underline mr-3">CGU</button>
+                   <button @click="router.push('/legal?tab=cgv')" class="text-xs text-gray-400 hover:text-primary transition underline mr-3">CGV</button>
+                   <button @click="router.push('/legal?tab=privacy')" class="text-xs text-gray-400 hover:text-primary transition underline">Confidentialité</button>
+                   <p class="text-[10px] text-gray-500 mt-2">{{ appName }} v1.0 — © 2025</p>
+                 </div>
             </div>
         </div>
     </transition>
-    
-    <!-- Simple Bottom Navigation (Home, Recherche, Carte, Profil) -->
     <div class="bottom-nav fixed bottom-0 w-full z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around items-center h-16 border-t border-gray-200 dark:border-white/10 pb-safe transition-colors duration-300">
         <button 
             @click="activeTab = 'feed'"
@@ -1764,6 +1946,135 @@ const handleDeleteEvent = async (eventId) => {
         </button>
 
     </div>
+
+    <!-- BOUTIQUE DE PASSES -->
+    <Teleport to="body">
+      <transition name="up">
+        <div v-if="showPassShop" class="fixed inset-0 bg-black z-[60] flex flex-col overflow-y-auto">
+          <!-- Header -->
+          <div class="px-5 py-4 flex justify-between items-center border-b border-gray-800 bg-black/90 backdrop-blur-md sticky top-0 z-10">
+            <div>
+              <h2 class="text-xl font-black text-white flex items-center gap-2">
+                <Sparkles class="w-5 h-5 text-yellow-400" /> Boutique Passes
+              </h2>
+              <p class="text-xs text-gray-400">Débloquez le contenu premium</p>
+            </div>
+            <button @click="closePassShop" class="bg-gray-800 p-2 rounded-full hover:bg-gray-700 transition">
+              <X class="w-5 h-5 text-white" />
+            </button>
+          </div>
+
+          <div class="p-5 pb-32">
+            <!-- STEP 1 : Choix du pass -->
+            <div v-if="passPurchaseStep === 'choose'">
+              <p class="text-gray-400 text-sm mb-5">Choisissez votre pass pour accéder aux événements et contenus premium.</p>
+              <div class="space-y-4">
+                <div v-for="pass in passOptions" :key="pass.id"
+                  @click="selectPass(pass.id)"
+                  class="relative rounded-2xl p-5 border-2 cursor-pointer transition hover:scale-[1.02] active:scale-95 overflow-hidden"
+                  :class="pass.popular ? 'border-purple-500 bg-gradient-to-br from-purple-900/40 to-pink-900/30' : 'border-gray-800 bg-gray-900 hover:border-gray-600'">
+                  <!-- Popular badge -->
+                  <div v-if="pass.popular" class="absolute top-0 right-0 bg-purple-500 text-white text-[10px] font-black px-3 py-1 rounded-bl-xl">POPULAIRE</div>
+                  <div class="flex items-start gap-4">
+                    <div class="text-3xl">{{ pass.emoji }}</div>
+                    <div class="flex-1">
+                      <div class="flex items-center justify-between">
+                        <h3 class="text-white font-bold text-lg">{{ pass.name }}</h3>
+                        <div class="text-right">
+                          <span class="text-2xl font-black text-white">{{ pass.price.toLocaleString() }}</span>
+                          <span class="text-gray-400 text-sm ml-1">{{ pass.currency }}</span>
+                        </div>
+                      </div>
+                      <p class="text-gray-400 text-sm mt-1">{{ pass.description }}</p>
+                      <div class="flex flex-wrap gap-1.5 mt-3">
+                        <span v-for="feat in pass.features" :key="feat" class="text-[10px] bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full">
+                          {{ feat }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- STEP 2 : Méthode de paiement -->
+            <div v-else-if="passPurchaseStep === 'payment'">
+              <button @click="passPurchaseStep = 'choose'" class="text-gray-400 text-sm mb-4 flex items-center gap-1 hover:text-white transition">
+                ← Retour aux passes
+              </button>
+              <h3 class="text-white font-bold text-lg mb-1">Méthode de paiement</h3>
+              <p class="text-gray-400 text-sm mb-5">Pass {{ PASS_CATALOG[selectedPassType]?.name }} — {{ PASS_CATALOG[selectedPassType]?.price?.toLocaleString() }} CFA</p>
+              <div class="space-y-3">
+                <div v-for="method in PAYMENT_METHODS" :key="method.id"
+                  @click="selectPayment(method.id)"
+                  class="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition hover:scale-[1.02] active:scale-95"
+                  :class="'border-gray-800 bg-gray-900 hover:border-gray-600'">
+                  <div class="text-2xl">{{ method.emoji }}</div>
+                  <div class="flex-1">
+                    <h4 class="text-white font-bold">{{ method.name }}</h4>
+                  </div>
+                  <ChevronRight class="w-5 h-5 text-gray-500" />
+                </div>
+              </div>
+            </div>
+
+            <!-- STEP 3 : Confirmation -->
+            <div v-else-if="passPurchaseStep === 'confirm'">
+              <button @click="passPurchaseStep = 'payment'" class="text-gray-400 text-sm mb-4 flex items-center gap-1 hover:text-white transition">
+                ← Retour au paiement
+              </button>
+              <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-6">
+                <h3 class="text-white font-bold text-lg mb-4 flex items-center gap-2">
+                  <CreditCard class="w-5 h-5 text-primary" /> Récapitulatif
+                </h3>
+                <div class="space-y-3 text-sm">
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">Pass</span>
+                    <span class="text-white font-bold">{{ PASS_CATALOG[selectedPassType]?.emoji }} {{ PASS_CATALOG[selectedPassType]?.name }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">Durée</span>
+                    <span class="text-white">{{ PASS_CATALOG[selectedPassType]?.durationDays }} jours</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">Paiement</span>
+                    <span class="text-white">{{ PAYMENT_METHODS.find(m => m.id === selectedPaymentMethod)?.emoji }} {{ PAYMENT_METHODS.find(m => m.id === selectedPaymentMethod)?.name }}</span>
+                  </div>
+                  <div class="border-t border-gray-700 pt-3 flex justify-between">
+                    <span class="text-gray-300 font-bold">Total</span>
+                    <span class="text-2xl font-black text-white">{{ PASS_CATALOG[selectedPassType]?.price?.toLocaleString() }} <span class="text-sm text-gray-400">CFA</span></span>
+                  </div>
+                </div>
+              </div>
+              <button 
+                @click="confirmPassPurchase"
+                :disabled="passPurchaseLoading"
+                class="w-full bg-gradient-to-r from-primary to-purple-600 text-black font-black py-4 rounded-2xl text-lg transition hover:scale-[1.02] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+                <Ticket class="w-5 h-5" />
+                <span v-if="!passPurchaseLoading">Confirmer le paiement</span>
+                <span v-else class="flex items-center gap-2"><Loader class="w-5 h-5 animate-spin" /> Traitement...</span>
+              </button>
+              <p class="text-gray-500 text-[10px] text-center mt-3">En confirmant, vous acceptez les conditions d'utilisation de Babi Vibes.</p>
+            </div>
+
+            <!-- STEP 4 : Succès -->
+            <div v-else-if="passPurchaseStep === 'success'" class="text-center py-10">
+              <div class="text-6xl mb-4">🎉</div>
+              <h3 class="text-2xl font-black text-white mb-2">Pass activé !</h3>
+              <p class="text-gray-400 mb-6">Votre Pass {{ PASS_CATALOG[selectedPassType]?.name }} est maintenant actif.</p>
+              <div class="bg-green-500/20 text-green-400 p-4 rounded-xl inline-flex items-center gap-2 font-bold text-sm mb-6">
+                <Check class="w-5 h-5" />
+                Valide pendant {{ PASS_CATALOG[selectedPassType]?.durationDays }} jours
+              </div>
+              <br/>
+              <button @click="closePassShop" class="bg-primary text-black font-bold px-8 py-3 rounded-xl hover:bg-primary/90 transition mt-4">
+                Retour au profil
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
 
     <!-- User Profile Modal -->
     <UserProfileModal v-if="showProfileModal" @profile-created="handleProfileCreated" />
@@ -1866,24 +2177,46 @@ const handleDeleteEvent = async (eventId) => {
                 </div>
 
                 <!-- Footer Actions -->
-                <div class="p-4 border-t border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row gap-3">
-                    <button
-                        @click="openExternalMap(googleMapsLocation)"
-                        class="flex-1 bg-primary text-black font-bold py-3 px-4 rounded-xl hover:bg-primary/90 transition active:scale-95 flex items-center justify-center gap-2"
-                    >
-                        <MapIcon class="w-5 h-5" />
-                        <span class="hidden sm:inline">Ouvrir dans Google Maps</span>
-                        <span class="sm:hidden">Google Maps</span>
-                    </button>
-                    <button
-                        v-if="selectedMapEvent && userStore.user?.phone"
-                        @click="sendItineraryWhatsApp(selectedMapEvent); showGoogleMapsModal = false"
-                        class="flex-1 bg-green-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-700 transition active:scale-95 flex items-center justify-center gap-2"
-                    >
-                        <span>📱</span>
-                        <span class="hidden sm:inline">Envoyer sur WhatsApp</span>
-                        <span class="sm:hidden">WhatsApp</span>
-                    </button>
+                <div class="p-4 border-t border-gray-200 dark:border-gray-800 flex flex-col gap-3">
+                    <!-- Ligne 1 : Navigation -->
+                    <div class="flex gap-2">
+                      <button
+                          @click="openExternalMap(googleMapsLocation)"
+                          class="flex-1 bg-primary text-black font-bold py-3 px-4 rounded-xl hover:bg-primary/90 transition active:scale-95 flex items-center justify-center gap-2"
+                      >
+                          <MapIcon class="w-5 h-5" />
+                          Google Maps
+                      </button>
+                      <button
+                          v-if="selectedMapEvent && userStore.user?.phone"
+                          @click="sendItineraryWhatsApp(selectedMapEvent); showGoogleMapsModal = false"
+                          class="flex-1 bg-green-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-700 transition active:scale-95 flex items-center justify-center gap-2"
+                      >
+                          <span>📱</span>
+                          WhatsApp
+                      </button>
+                    </div>
+                    <!-- Ligne 2 : VTC Deep Links -->
+                    <div v-if="selectedMapEvent?.coords" class="flex gap-2">
+                      <button
+                          @click="openVTC('uber')"
+                          class="flex-1 bg-black text-white font-bold py-2.5 px-3 rounded-xl hover:bg-gray-900 transition active:scale-95 flex items-center justify-center gap-2 text-sm border border-gray-700"
+                      >
+                          🚕 Uber
+                      </button>
+                      <button
+                          @click="openVTC('yango')"
+                          class="flex-1 bg-red-600 text-white font-bold py-2.5 px-3 rounded-xl hover:bg-red-700 transition active:scale-95 flex items-center justify-center gap-2 text-sm"
+                      >
+                          🚗 Yango
+                      </button>
+                      <button
+                          @click="openVTC('waze')"
+                          class="flex-1 bg-blue-500 text-white font-bold py-2.5 px-3 rounded-xl hover:bg-blue-600 transition active:scale-95 flex items-center justify-center gap-2 text-sm"
+                      >
+                          🗺️ Waze
+                      </button>
+                    </div>
                     <button
                         @click="showGoogleMapsModal = false"
                         class="sm:hidden bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white font-bold py-3 px-4 rounded-xl hover:bg-gray-300 dark:hover:bg-gray-600 transition active:scale-95"

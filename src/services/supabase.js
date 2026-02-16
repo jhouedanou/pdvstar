@@ -42,6 +42,9 @@ function toSupabaseEvent(eventData) {
     // video_url : ajouté conditionnellement (la colonne peut ne pas encore exister)
     if (eventData.videoUrl) mapped.video_url = eventData.videoUrl
     if (eventData.createdBy !== undefined) mapped.created_by = eventData.createdBy
+    // Modération : status et motif de rejet
+    if (eventData.status !== undefined) mapped.status = eventData.status
+    if (eventData.rejectionReason !== undefined) mapped.rejection_reason = eventData.rejectionReason
     return mapped
 }
 
@@ -74,7 +77,9 @@ function fromSupabaseEvent(row) {
         musicTitle: row.music_title || '',
         promoText: row.promo_text || '',
         createdBy: row.created_by || null,
-        createdAt: row.created_at
+        createdAt: row.created_at,
+        status: row.status || 'approved',
+        rejectionReason: row.rejection_reason || ''
     }
 }
 
@@ -197,6 +202,200 @@ export async function seedEvents(eventsArray) {
     }
 
     return data.map(fromSupabaseEvent)
+}
+
+// ============================
+// Passes d'Accès (Tarification)
+// ============================
+
+/**
+ * Catalogue des passes disponibles
+ */
+export const PASS_CATALOG = {
+    decouverte: {
+        id: 'decouverte',
+        name: 'Découverte',
+        emoji: '🎟️',
+        price: 5000,
+        currency: 'CFA',
+        durationDays: 3,
+        description: 'Accès illimité pendant 3 jours',
+        features: ['Accès aux événements premium', 'Contenu exclusif 3 jours', 'Badge Découverte'],
+        color: 'from-blue-500 to-cyan-400'
+    },
+    standard: {
+        id: 'standard',
+        name: 'Standard',
+        emoji: '⭐',
+        price: 15000,
+        currency: 'CFA',
+        durationDays: 30,
+        description: 'Accès complet pendant 1 mois',
+        features: ['Accès aux événements premium', 'Contenu exclusif 1 mois', 'Badge Standard', 'Priorité notifications'],
+        color: 'from-purple-500 to-pink-500',
+        popular: true
+    },
+    premium: {
+        id: 'premium',
+        name: 'Premium',
+        emoji: '👑',
+        price: 30000,
+        currency: 'CFA',
+        durationDays: 30,
+        description: 'Accès VIP pendant 1 mois',
+        features: ['Accès illimité tous événements', 'Contenu VIP exclusif', 'Badge Premium Or', 'Priorité notifications', 'Support prioritaire', 'Pas de publicités'],
+        color: 'from-yellow-500 to-orange-500'
+    }
+}
+
+/**
+ * Méthodes de paiement supportées
+ */
+export const PAYMENT_METHODS = [
+    { id: 'orange_money', name: 'Orange Money', emoji: '🟠', color: 'bg-orange-500' },
+    { id: 'mtn_momo', name: 'MTN MoMo', emoji: '🟡', color: 'bg-yellow-500' },
+    { id: 'wave', name: 'Wave', emoji: '🔵', color: 'bg-blue-500' },
+    { id: 'card', name: 'Carte bancaire', emoji: '💳', color: 'bg-gray-600' }
+]
+
+function fromSupabasePass(row) {
+    return {
+        id: row.id,
+        userId: row.user_id,
+        passType: row.pass_type,
+        purchasedAt: row.purchased_at,
+        expiresAt: row.expires_at,
+        paymentMethod: row.payment_method || null,
+        paymentRef: row.payment_ref || null,
+        status: row.status || 'active',
+        createdAt: row.created_at
+    }
+}
+
+/**
+ * Acheter / activer un pass pour un utilisateur
+ */
+export async function purchasePass(userId, passType, paymentMethod, paymentRef) {
+    const passDef = PASS_CATALOG[passType]
+    if (!passDef) throw new Error('Type de pass invalide: ' + passType)
+
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + passDef.durationDays * 24 * 60 * 60 * 1000)
+
+    const mapped = {
+        user_id: userId,
+        pass_type: passType,
+        purchased_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        payment_method: paymentMethod,
+        payment_ref: paymentRef || null,
+        status: 'active'
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('user_passes')
+            .insert(mapped)
+            .select()
+            .single()
+
+        if (error) {
+            console.error('❌ Erreur purchasePass:', error.message)
+            // Fallback: stocker localement
+            return {
+                id: 'local_' + Date.now(),
+                ...mapped,
+                userId: mapped.user_id,
+                passType: mapped.pass_type,
+                purchasedAt: mapped.purchased_at,
+                expiresAt: mapped.expires_at,
+                paymentMethod: mapped.payment_method,
+                paymentRef: mapped.payment_ref
+            }
+        }
+        return fromSupabasePass(data)
+    } catch (err) {
+        console.error('❌ Erreur réseau purchasePass:', err)
+        return {
+            id: 'local_' + Date.now(),
+            userId,
+            passType,
+            purchasedAt: now.toISOString(),
+            expiresAt: expiresAt.toISOString(),
+            paymentMethod,
+            paymentRef,
+            status: 'active'
+        }
+    }
+}
+
+/**
+ * Récupérer le pass actif d'un utilisateur
+ */
+export async function getActivePass(userId) {
+    try {
+        const { data, error } = await supabase
+            .from('user_passes')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .gte('expires_at', new Date().toISOString())
+            .order('expires_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+        if (error) {
+            console.error('❌ Erreur getActivePass:', error.message)
+            return null
+        }
+        return data ? fromSupabasePass(data) : null
+    } catch (err) {
+        console.error('❌ Erreur réseau getActivePass:', err)
+        return null
+    }
+}
+
+/**
+ * Récupérer l'historique des passes d'un utilisateur
+ */
+export async function getUserPasses(userId) {
+    try {
+        const { data, error } = await supabase
+            .from('user_passes')
+            .select('*')
+            .eq('user_id', userId)
+            .order('purchased_at', { ascending: false })
+
+        if (error) {
+            console.error('❌ Erreur getUserPasses:', error.message)
+            return []
+        }
+        return data.map(fromSupabasePass)
+    } catch (err) {
+        console.error('❌ Erreur réseau getUserPasses:', err)
+        return []
+    }
+}
+
+/**
+ * Admin : récupérer tous les passes (stats)
+ */
+export async function fetchAllPasses() {
+    try {
+        const { data, error } = await supabase
+            .from('user_passes')
+            .select('*')
+            .order('purchased_at', { ascending: false })
+
+        if (error) {
+            console.error('❌ Erreur fetchAllPasses:', error.message)
+            return []
+        }
+        return data.map(fromSupabasePass)
+    } catch (err) {
+        console.error('❌ Erreur réseau fetchAllPasses:', err)
+        return []
+    }
 }
 
 // ============================

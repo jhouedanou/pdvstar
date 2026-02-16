@@ -8,7 +8,8 @@ import {
     LogOut, Plus, Edit, Trash2, Calendar, MapPin,
     X, Check, Camera, Save, ArrowLeft, Mic, MicOff, Volume2,
     Search, Loader2, Navigation, Tag, Store, Megaphone,
-    Video, SwitchCamera, Locate, CameraOff, Image, Play, Link
+    Video, SwitchCamera, Locate, CameraOff, Image, Play, Link,
+    ShieldCheck, ShieldX, Clock, Filter, Eye, EyeOff
 } from 'lucide-vue-next'
 import L from 'leaflet'
 
@@ -255,6 +256,46 @@ const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const editingEvent = ref(null)
 const deleteConfirmId = ref(null)
+const statusFilter = ref('all') // all, pending, approved, rejected
+const showRejectModal = ref(false)
+const rejectingEvent = ref(null)
+const rejectionReason = ref('')
+
+// Modération : compteurs par status
+const statusCounts = computed(() => {
+    const all = isOrganizerMode.value ? events.value : eventStore.events
+    return {
+        all: all.length,
+        pending: all.filter(e => e.status === 'pending').length,
+        approved: all.filter(e => !e.status || e.status === 'approved').length,
+        rejected: all.filter(e => e.status === 'rejected').length
+    }
+})
+
+// Approuver un événement
+const approveEvent = async (event) => {
+    await eventStore.updateEvent(event.id, { status: 'approved', rejectionReason: '' })
+}
+
+// Ouvrir la modale de rejet
+const openRejectModal = (event) => {
+    rejectingEvent.value = event
+    rejectionReason.value = ''
+    showRejectModal.value = true
+}
+
+// Confirmer le rejet
+const confirmReject = async () => {
+    if (rejectingEvent.value) {
+        await eventStore.updateEvent(rejectingEvent.value.id, {
+            status: 'rejected',
+            rejectionReason: rejectionReason.value || 'Non conforme aux critères'
+        })
+    }
+    showRejectModal.value = false
+    rejectingEvent.value = null
+    rejectionReason.value = ''
+}
 
 // Form data
 const defaultForm = () => ({
@@ -296,6 +337,14 @@ const events = computed(() => {
             const orgName = (e.organizer || '').toLowerCase()
             return names.some(n => orgName === n || orgName.includes(n))
         })
+    }
+    // Filtre par status de modération
+    if (statusFilter.value !== 'all') {
+        if (statusFilter.value === 'approved') {
+            list = list.filter(e => !e.status || e.status === 'approved')
+        } else {
+            list = list.filter(e => e.status === statusFilter.value)
+        }
     }
     // Tri chronologique : du plus récent au plus ancien
     return list.sort((a, b) => {
@@ -367,7 +416,8 @@ const createEvent = async () => {
         mediaType: form.value.mediaType || 'image',
         videoUrl: form.value.videoUrl || '',
         createdBy: userStore.user?.id || null,
-        distance: '0 km'
+        distance: '0 km',
+        status: isOrganizerMode.value ? 'pending' : 'approved'
     })
     closeModals()
 }
@@ -975,10 +1025,10 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
       </div>
 
       <!-- Stats & Actions -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
         <div>
           <h2 class="text-2xl font-bold text-white">Gestion des Événements</h2>
-          <p class="text-gray-400">{{ events.length }} événement(s) au total</p>
+          <p class="text-gray-400">{{ events.length }} événement(s) affiché(s)</p>
         </div>
         <div class="flex items-center gap-3">
           <button 
@@ -996,6 +1046,30 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             Publicités
           </router-link>
         </div>
+      </div>
+
+      <!-- Modération : Filtre par status -->
+      <div v-if="!isOrganizerMode" class="flex gap-2 mb-6 overflow-x-auto no-scrollbar pb-1">
+        <button @click="statusFilter = 'all'"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border flex items-center gap-1.5"
+          :class="statusFilter === 'all' ? 'bg-white text-black border-white' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'">
+          <Filter class="w-3 h-3" /> Tous ({{ statusCounts.all }})
+        </button>
+        <button @click="statusFilter = 'pending'"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border flex items-center gap-1.5"
+          :class="statusFilter === 'pending' ? 'bg-yellow-500 text-black border-yellow-500' : 'bg-gray-800 text-yellow-400 border-gray-700 hover:border-yellow-500/50'">
+          <Clock class="w-3 h-3" /> En attente ({{ statusCounts.pending }})
+        </button>
+        <button @click="statusFilter = 'approved'"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border flex items-center gap-1.5"
+          :class="statusFilter === 'approved' ? 'bg-green-500 text-black border-green-500' : 'bg-gray-800 text-green-400 border-gray-700 hover:border-green-500/50'">
+          <ShieldCheck class="w-3 h-3" /> Approuvés ({{ statusCounts.approved }})
+        </button>
+        <button @click="statusFilter = 'rejected'"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border flex items-center gap-1.5"
+          :class="statusFilter === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-gray-800 text-red-400 border-gray-700 hover:border-red-500/50'">
+          <ShieldX class="w-3 h-3" /> Rejetés ({{ statusCounts.rejected }})
+        </button>
       </div>
 
       <!-- Events Grid -->
@@ -1028,9 +1102,43 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             <div v-if="event.isPremium" class="mt-2">
               <span class="bg-primary/20 text-primary text-xs px-2 py-1 rounded-full">Premium - {{ event.price }} CFA</span>
             </div>
+
+            <!-- Status Badge -->
+            <div class="mt-2">
+              <span v-if="event.status === 'pending'" class="inline-flex items-center gap-1 bg-yellow-500/20 text-yellow-400 text-xs px-2 py-1 rounded-full">
+                <Clock class="w-3 h-3" /> En attente de validation
+              </span>
+              <span v-else-if="event.status === 'rejected'" class="inline-flex items-center gap-1 bg-red-500/20 text-red-400 text-xs px-2 py-1 rounded-full">
+                <ShieldX class="w-3 h-3" /> Rejeté
+              </span>
+              <span v-else class="inline-flex items-center gap-1 bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded-full">
+                <ShieldCheck class="w-3 h-3" /> Approuvé
+              </span>
+              <p v-if="event.status === 'rejected' && event.rejectionReason" class="text-red-400/70 text-xs mt-1 italic">
+                Motif : {{ event.rejectionReason }}
+              </p>
+            </div>
+
+            <!-- Modération Buttons (admin seulement, événements en attente) -->
+            <div v-if="!isOrganizerMode && event.status === 'pending'" class="flex gap-2 mt-3">
+              <button
+                @click="approveEvent(event)"
+                class="flex-1 bg-green-500/20 text-green-400 py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-green-500/30 transition text-sm font-bold"
+              >
+                <ShieldCheck class="w-4 h-4" />
+                Approuver
+              </button>
+              <button
+                @click="openRejectModal(event)"
+                class="flex-1 bg-red-500/20 text-red-400 py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-red-500/30 transition text-sm font-bold"
+              >
+                <ShieldX class="w-4 h-4" />
+                Rejeter
+              </button>
+            </div>
             
             <!-- Actions -->
-            <div class="flex gap-2 mt-4">
+            <div class="flex gap-2 mt-3">
               <button 
                 @click="openEditModal(event)"
                 class="flex-1 bg-gray-800 text-white py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-gray-700 transition"
@@ -1076,6 +1184,47 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
         </button>
       </div>
     </main>
+
+    <!-- Modale de Rejet -->
+    <Teleport to="body">
+      <div
+        v-if="showRejectModal"
+        class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+        @click.self="showRejectModal = false"
+      >
+        <div class="bg-surface rounded-2xl w-full max-w-md p-6">
+          <h3 class="text-xl font-bold text-white mb-2 flex items-center gap-2">
+            <ShieldX class="w-6 h-6 text-red-400" />
+            Rejeter l'événement
+          </h3>
+          <p class="text-gray-400 text-sm mb-4">
+            « {{ rejectingEvent?.title }} »
+          </p>
+          <label class="block text-sm font-medium text-gray-300 mb-2">Motif du rejet *</label>
+          <textarea
+            v-model="rejectionReason"
+            placeholder="Expliquez pourquoi cet événement est rejeté..."
+            rows="4"
+            class="w-full bg-gray-800 border border-gray-700 rounded-xl p-3 text-white text-sm placeholder-gray-500 focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none resize-none"
+          />
+          <div class="flex gap-3 mt-4">
+            <button
+              @click="showRejectModal = false; rejectionReason = ''"
+              class="flex-1 bg-gray-800 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-700 transition"
+            >
+              Annuler
+            </button>
+            <button
+              @click="confirmReject"
+              :disabled="!rejectionReason.trim()"
+              class="flex-1 bg-red-500 text-white py-2.5 rounded-xl font-bold hover:bg-red-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Confirmer le rejet
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Create/Edit Modal -->
     <Teleport to="body">

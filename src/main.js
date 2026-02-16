@@ -12,6 +12,7 @@ import CreateEventWizard from './components/CreateEventWizard.vue'
 import AdminLogin from './views/AdminLogin.vue'
 import AdminDashboard from './views/AdminDashboard.vue'
 import AdsDashboard from './views/AdsDashboard.vue'
+import LegalPages from './views/LegalPages.vue'
 
 const routes = [
     { path: '/', component: FeedUser }, // Default to User Feed
@@ -20,6 +21,7 @@ const routes = [
     { path: '/admin', component: AdminLogin },
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
     { path: '/admin/ads', component: AdsDashboard, meta: { requiresAdmin: true } },
+    { path: '/legal', component: LegalPages },
 ]
 
 const router = createRouter({

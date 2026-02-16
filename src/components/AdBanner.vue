@@ -1,24 +1,40 @@
 <script setup>
-import { defineProps, ref } from 'vue'
-import { ExternalLink, Eye } from 'lucide-vue-next'
-import { incrementAdClick } from '../services/supabase'
+import { defineProps, ref, onMounted } from 'vue'
+import { ExternalLink, Eye, Share2 } from 'lucide-vue-next'
+import { incrementAdClick, supabase } from '../services/supabase'
 
 const props = defineProps({
     ad: {
         type: Object,
         required: true
+    },
+    format: {
+        type: String,
+        default: 'fullscreen' // 'fullscreen' | 'native' | 'interstitial'
     }
 })
 
 const viewCount = ref(props.ad.viewCount || Math.floor(Math.random() * 1000) + 500)
 const hasViewed = ref(false)
 
+// Track impression on mount
+onMounted(async () => {
+    try {
+        await supabase.from('ads').select('view_count').eq('id', props.ad.id).single().then(async ({ data }) => {
+            if (data) {
+                await supabase.from('ads').update({ view_count: (data.view_count || 0) + 1 }).eq('id', props.ad.id)
+                viewCount.value = (data.view_count || 0) + 1
+            }
+        })
+    } catch (e) {
+        // Silently fail
+    }
+})
+
 const handleAdClick = async () => {
     if (!hasViewed.value) {
         viewCount.value++
         hasViewed.value = true
-        console.log('Ad clicked:', props.ad.id, props.ad.sponsor)
-        // Track click in Supabase
         try {
             await incrementAdClick(props.ad.id)
         } catch (e) {
@@ -29,6 +45,18 @@ const handleAdClick = async () => {
     const link = props.ad.link || '#'
     if (link && link !== '#') {
         window.open(link, '_blank')
+    }
+}
+
+const shareAd = async () => {
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: props.ad.title,
+                text: props.ad.description,
+                url: props.ad.link || window.location.href
+            })
+        } catch (e) { /* cancelled */ }
     }
 }
 </script>
