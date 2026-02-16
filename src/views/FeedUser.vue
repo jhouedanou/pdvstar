@@ -534,32 +534,135 @@ const drawRoute = async (fromLat, fromLng, toLat, toLng) => {
 // --- Search Logic ---
 const searchQuery = ref('')
 const showPremiumOnly = ref(false)
+const searchDateFilter = ref('all') // all, today, this_week, this_month
+const searchPriceFilter = ref('all') // all, free, paid
+const searchLocationFilter = ref('')
+const searchTagFilter = ref('')
+
+// Extraire les lieux uniques et tags uniques pour les filtres
+const uniqueLocations = computed(() => {
+    const locations = eventStore.events.map(e => e.location).filter(Boolean)
+    return [...new Set(locations)].sort()
+})
+const uniqueTags = computed(() => {
+    const tags = eventStore.events.flatMap(e => e.features || []).filter(Boolean)
+    return [...new Set(tags)].sort()
+})
+
+const resetSearchFilters = () => {
+    searchQuery.value = ''
+    showPremiumOnly.value = false
+    searchDateFilter.value = 'all'
+    searchPriceFilter.value = 'all'
+    searchLocationFilter.value = ''
+    searchTagFilter.value = ''
+}
+
+const activeFiltersCount = computed(() => {
+    let count = 0
+    if (showPremiumOnly.value) count++
+    if (searchDateFilter.value !== 'all') count++
+    if (searchPriceFilter.value !== 'all') count++
+    if (searchLocationFilter.value) count++
+    if (searchTagFilter.value) count++
+    return count
+})
+
+const dateFilterOptions = [
+    { v: 'all', l: 'Toutes dates' },
+    { v: 'today', l: "Aujourd'hui" },
+    { v: 'this_week', l: 'Cette semaine' },
+    { v: 'this_month', l: 'Ce mois' }
+]
+
+const priceFilterOptions = [
+    { v: 'all', l: 'Tous prix' },
+    { v: 'free', l: 'Gratuit' },
+    { v: 'paid', l: 'Payant' }
+]
 
 const filteredEvents = computed(() => {
-    let results = eventStore.events
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     
-    // Filter by premium if toggle is on
+    let results = eventStore.events
+        .filter(e => !!e.date && new Date(e.date) >= today) // à venir uniquement
+    
+    // Filtre premium
     if (showPremiumOnly.value) {
         results = results.filter(e => e.isPremium)
     }
     
-    // Filter by search query
+    // Filtre par mots-clés
     if (searchQuery.value) {
+        const q = searchQuery.value.toLowerCase()
         results = results.filter(e => 
-            e.title.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
-            e.description.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-            e.location.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-            e.organizer.toLowerCase().includes(searchQuery.value.toLowerCase())
+            (e.title || '').toLowerCase().includes(q) || 
+            (e.description || '').toLowerCase().includes(q) ||
+            (e.location || '').toLowerCase().includes(q) ||
+            (e.organizer || '').toLowerCase().includes(q) ||
+            (e.features || []).some(f => f.toLowerCase().includes(q))
         )
     }
+
+    // Filtre par date
+    if (searchDateFilter.value !== 'all') {
+        const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+        const endOfWeek = new Date(today); endOfWeek.setDate(endOfWeek.getDate() + (7 - endOfWeek.getDay()))
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+
+        if (searchDateFilter.value === 'today') {
+            results = results.filter(e => {
+                const d = new Date(e.date)
+                return d >= today && d < tomorrow
+            })
+        } else if (searchDateFilter.value === 'this_week') {
+            results = results.filter(e => new Date(e.date) <= endOfWeek)
+        } else if (searchDateFilter.value === 'this_month') {
+            results = results.filter(e => new Date(e.date) <= endOfMonth)
+        }
+    }
+
+    // Filtre par prix
+    if (searchPriceFilter.value === 'free') {
+        results = results.filter(e => !e.isPremium || !e.price)
+    } else if (searchPriceFilter.value === 'paid') {
+        results = results.filter(e => e.isPremium && e.price > 0)
+    }
+
+    // Filtre par lieu
+    if (searchLocationFilter.value) {
+        results = results.filter(e => (e.location || '').toLowerCase().includes(searchLocationFilter.value.toLowerCase()))
+    }
+
+    // Filtre par tag/catégorie
+    if (searchTagFilter.value) {
+        results = results.filter(e => (e.features || []).some(f => f === searchTagFilter.value))
+    }
     
-    return results
+    // Tri chronologique : du plus proche au plus lointain
+    return results.sort((a, b) => new Date(a.date) - new Date(b.date))
 })
 
 const handleSearchSelect = (event) => {
-    // Scroll to event or just show it (for MVP just close search)
-    activeTab.value = 'feed'
-    // In a real app we would scroll to the specific slide
+    // Fermer la recherche et scroller vers l'event dans le feed
+    showSearch.value = false
+    resetSearchFilters()
+    
+    nextTick(() => {
+        const eventIndex = feedItems.value.findIndex(item =>
+            item.type === 'event' && item.data.id === event.id
+        )
+        if (eventIndex !== -1 && feedContainer.value) {
+            const slideHeight = window.innerHeight
+            currentSlideIndex.value = eventIndex
+            feedContainer.value.scrollTo({
+                top: eventIndex * slideHeight,
+                behavior: 'smooth'
+            })
+            setTimeout(() => syncYouTubePlayback(), 500)
+        }
+    })
 }
 
 // --- Profile Logic ---
@@ -1197,61 +1300,141 @@ const handleDeleteEvent = async (eventId) => {
     <!-- SEARCH MODAL -->
     <transition name="fade">
         <div v-if="showSearch" class="fixed inset-0 bg-gray-50 dark:bg-black/95 dark:backdrop-blur-xl z-50 flex flex-col pt-12 px-4 transition-colors duration-300">
-             <div class="flex justify-between items-center mb-6">
+             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-purple-500">Recherche</h2>
-                <button @click="showSearch = false" class="text-gray-900 dark:text-white p-2"><X class="w-7 h-7" /></button>
+                <div class="flex items-center gap-2">
+                    <button v-if="activeFiltersCount > 0" @click="resetSearchFilters" class="text-xs text-primary font-bold bg-primary/10 px-3 py-1.5 rounded-full">
+                        Réinitialiser ({{ activeFiltersCount }})
+                    </button>
+                    <button @click="showSearch = false; resetSearchFilters()" class="text-gray-900 dark:text-white p-2"><X class="w-7 h-7" /></button>
+                </div>
             </div>
 
-            <div class="relative mb-4">
+            <!-- Search Input -->
+            <div class="relative mb-3">
                 <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input 
                     v-model="searchQuery" 
                     type="text" 
-                    placeholder="Chercher un artiste, un lieu..." 
-                    class="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-transparent rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm"
+                    placeholder="Chercher un artiste, un lieu, un type..." 
+                    class="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-transparent rounded-xl py-3 pl-10 pr-10 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm"
                     autofocus
                 >
-            </div>
-
-            <!-- Premium Filter Toggle -->
-            <div class="mb-6">
-                <button 
-                    @click="showPremiumOnly = !showPremiumOnly"
-                    class="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all"
-                    :class="showPremiumOnly 
-                        ? 'bg-gradient-to-r from-yellow-400 to-amber-500 text-black shadow-lg' 
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'"
-                >
-                    <Crown class="w-4 h-4" />
-                    <span>{{ showPremiumOnly ? 'Tous les événements' : 'Événements Premium uniquement' }}</span>
+                <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X class="w-4 h-4" />
                 </button>
             </div>
 
+            <!-- Filters Row -->
+            <div class="flex flex-col gap-2 mb-4">
+                <!-- Date Filter -->
+                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <button v-for="opt in dateFilterOptions" 
+                        :key="opt.v"
+                        @click="searchDateFilter = opt.v"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        :class="searchDateFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >
+                        <Calendar v-if="opt.v !== 'all'" class="w-3 h-3 inline mr-1" />{{ opt.l }}
+                    </button>
+                </div>
+
+                <!-- Price + Premium Filter -->
+                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <button v-for="opt in priceFilterOptions" 
+                        :key="opt.v"
+                        @click="searchPriceFilter = opt.v"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        :class="searchPriceFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >
+                        {{ opt.l }}
+                    </button>
+                    <button 
+                        @click="showPremiumOnly = !showPremiumOnly"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border flex items-center gap-1"
+                        :class="showPremiumOnly ? 'bg-gradient-to-r from-yellow-400 to-amber-500 text-black border-amber-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >
+                        <Crown class="w-3 h-3" /> Premium
+                    </button>
+                </div>
+
+                <!-- Location Filter -->
+                <div v-if="uniqueLocations.length > 1" class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <button 
+                        @click="searchLocationFilter = ''"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        :class="!searchLocationFilter ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >Tous lieux</button>
+                    <button v-for="loc in uniqueLocations.slice(0, 10)" 
+                        :key="loc"
+                        @click="searchLocationFilter = searchLocationFilter === loc ? '' : loc"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        :class="searchLocationFilter === loc ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >
+                        <MapPin class="w-3 h-3 inline mr-0.5" />{{ loc.length > 20 ? loc.slice(0,20) + '…' : loc }}
+                    </button>
+                </div>
+
+                <!-- Tag/Category Filter -->
+                <div v-if="uniqueTags.length > 0" class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <button 
+                        @click="searchTagFilter = ''"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        :class="!searchTagFilter ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >Toutes catégories</button>
+                    <button v-for="tag in uniqueTags.slice(0, 15)" 
+                        :key="tag"
+                        @click="searchTagFilter = searchTagFilter === tag ? '' : tag"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        :class="searchTagFilter === tag ? 'bg-purple-500 text-white border-purple-500' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
+                    >
+                        ✨ {{ tag }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Count -->
+            <div class="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">
+                {{ filteredEvents.length }} événement{{ filteredEvents.length > 1 ? 's' : '' }} trouvé{{ filteredEvents.length > 1 ? 's' : '' }}
+            </div>
+
+            <!-- Results -->
             <div class="flex-1 overflow-y-auto">
                 <div v-if="filteredEvents.length === 0" class="text-center text-gray-500 mt-10">
-                    {{ searchQuery ? 'Aucun résultat trouvé 😢' : 'Commencez à taper pour rechercher...' }}
+                    <Search class="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p class="font-semibold">Aucun résultat</p>
+                    <p class="text-sm mt-1">Essayez d'autres filtres ou mots-clés</p>
                 </div>
                 
-                <div class="grid grid-cols-2 gap-4 pb-20">
-                    <div v-for="event in (searchQuery || showPremiumOnly ? filteredEvents : eventStore.events)" :key="event.id" 
+                <div class="space-y-3 pb-24">
+                    <div v-for="event in filteredEvents" :key="event.id" 
                          @click="handleSearchSelect(event)"
-                         class="bg-white dark:bg-gray-800 rounded-lg overflow-hidden active:scale-95 transition cursor-pointer shadow-md dark:shadow-none relative">
-                        <div class="relative">
-                            <img :src="event.image" class="w-full h-32 object-cover">
-                            <!-- Premium Badge on Image -->
-                            <div v-if="event.isPremium" class="absolute top-2 right-2">
-                                <div class="bg-gradient-to-r from-yellow-400 to-amber-500 p-1 rounded-full shadow-lg">
-                                    <Crown class="w-3 h-3 text-black" />
-                                </div>
+                         class="bg-white dark:bg-gray-800/80 rounded-xl overflow-hidden active:scale-[0.98] transition cursor-pointer shadow-md dark:shadow-none flex h-24">
+                        <!-- Image -->
+                        <div class="w-24 h-24 flex-shrink-0 relative">
+                            <img :src="event.image" class="w-full h-full object-cover" />
+                            <div v-if="event.isPremium" class="absolute top-1 right-1 bg-gradient-to-r from-yellow-400 to-amber-500 p-0.5 rounded-full">
+                                <Crown class="w-2.5 h-2.5 text-black" />
                             </div>
                         </div>
-                        <div class="p-2">
-                            <div class="flex items-center gap-1 mb-1">
-                                <h3 class="font-bold text-sm truncate text-gray-900 dark:text-white flex-1">{{ event.title }}</h3>
+                        <!-- Info -->
+                        <div class="flex-1 p-2.5 flex flex-col justify-between min-w-0">
+                            <div>
+                                <h3 class="font-bold text-sm truncate text-gray-900 dark:text-white">{{ event.title }}</h3>
+                                <div class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                    <Calendar class="w-3 h-3 text-primary flex-shrink-0" />
+                                    <span class="text-primary font-semibold">{{ getDateDisplayText(event.date) }}</span>
+                                    <span>à {{ new Date(event.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) }}</span>
+                                </div>
                             </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{ new Date(event.date).toLocaleDateString('fr-FR') }}</p>
-                            <div v-if="event.isPremium" class="text-xs font-bold text-amber-500">
-                                {{ event.price?.toLocaleString() }} CFA
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-0.5 truncate">
+                                    <MapPin class="w-3 h-3 flex-shrink-0" />{{ event.location }}
+                                </span>
+                                <span v-if="event.isPremium && event.price" class="text-xs font-bold text-amber-500 whitespace-nowrap ml-2">
+                                    {{ event.price?.toLocaleString() }} CFA
+                                </span>
+                                <span v-else class="text-xs font-medium text-green-500 whitespace-nowrap ml-2">Gratuit</span>
                             </div>
                         </div>
                     </div>
