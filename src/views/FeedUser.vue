@@ -888,32 +888,33 @@ const handleDeleteEvent = async (eventId) => {
 
         <!-- Background Image/Video -->
         <div class="absolute inset-0 bg-gray-900">
-           <!-- YouTube Video Background (plein écran) -->
+           <!-- Image de couverture (toujours présente en base, même derrière une vidéo) -->
+           <img
+             v-if="item.data.image"
+             :src="item.data.image"
+             alt="Event Cover"
+             class="absolute inset-0 w-full h-full object-cover opacity-90"
+           />
+           <div v-else class="absolute inset-0 w-full h-full bg-gradient-to-br from-primary/30 via-gray-900 to-gray-800"></div>
+           <!-- YouTube Video Background (plein écran, par-dessus l'image) -->
            <iframe
              v-if="hasInteracted && (item.data.mediaType === 'youtube' || item.data.mediaType === 'youtube_short') && item.data.videoUrl && getYouTubeId(item.data.videoUrl)"
              :src="`https://www.youtube.com/embed/${getYouTubeId(item.data.videoUrl)}?autoplay=${itemIndex === currentSlideIndex ? 1 : 0}&mute=1&loop=1&playlist=${getYouTubeId(item.data.videoUrl)}&controls=0&showinfo=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(appOrigin)}`"
-             class="absolute inset-0 w-full h-full border-0 pointer-events-none"
+             class="absolute inset-0 w-full h-full border-0 pointer-events-none z-[1]"
              :style="item.data.mediaType === 'youtube' ? 'transform: scale(1.5);' : ''"
              frameborder="0"
              allow="autoplay; encrypted-media"
              :loading="itemIndex < 3 ? 'eager' : 'lazy'"
            ></iframe>
-           <!-- TikTok Video Background (embed) -->
+           <!-- TikTok Video Background (embed, par-dessus l'image) -->
            <iframe
-             v-else-if="hasInteracted && item.data.mediaType === 'tiktok' && item.data.videoUrl && getTikTokId(item.data.videoUrl)"
+             v-if="hasInteracted && item.data.mediaType === 'tiktok' && item.data.videoUrl && getTikTokId(item.data.videoUrl)"
              :src="`https://www.tiktok.com/embed/v2/${getTikTokId(item.data.videoUrl)}?lang=fr`"
-             class="absolute inset-0 w-full h-full border-0"
+             class="absolute inset-0 w-full h-full border-0 z-[1]"
              frameborder="0"
              allow="autoplay; encrypted-media"
              :loading="itemIndex < 3 ? 'eager' : 'lazy'"
            ></iframe>
-           <!-- Fallback: Event image (toujours visible si type image ou pas de vidéo) -->
-           <img
-             v-else
-             :src="item.data.image"
-             alt="Event Cover"
-             class="w-full h-full object-cover opacity-90"
-           />
            <!-- YouTube Background AUDIO (iframe caché pour musique de fond, séparé de la vidéo d'illustration) -->
            <iframe 
              v-if="hasInteracted && item.data.backgroundMusic && getYouTubeId(item.data.backgroundMusic) && !(item.data.mediaType === 'youtube' || item.data.mediaType === 'youtube_short')"
