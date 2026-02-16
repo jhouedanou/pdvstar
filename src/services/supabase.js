@@ -34,11 +34,13 @@ function toSupabaseEvent(eventData) {
         is_premium: eventData.isPremium ?? false,
         price: eventData.price ?? 0,
         features: eventData.features || [],
-        type: eventData.type || 'image',
+        type: eventData.mediaType || eventData.type || 'image',
         background_music: eventData.backgroundMusic || null,
         music_title: eventData.musicTitle || null,
         promo_text: eventData.promoText || null
     }
+    // video_url : ajouté conditionnellement (la colonne peut ne pas encore exister)
+    if (eventData.videoUrl) mapped.video_url = eventData.videoUrl
     if (eventData.createdBy !== undefined) mapped.created_by = eventData.createdBy
     return mapped
 }
@@ -66,6 +68,8 @@ function fromSupabaseEvent(row) {
         price: row.price || 0,
         features: row.features || [],
         type: row.type || 'image',
+        mediaType: row.type || 'image',
+        videoUrl: row.video_url || '',
         backgroundMusic: row.background_music || '',
         musicTitle: row.music_title || '',
         promoText: row.promo_text || '',
@@ -97,11 +101,24 @@ export async function fetchEvents() {
 export async function createEvent(eventData) {
     const mapped = toSupabaseEvent(eventData)
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
         .from('events')
         .insert(mapped)
         .select()
         .single()
+
+    // Si erreur (ex: colonne video_url inexistante), retry sans video_url
+    if (error && mapped.video_url !== undefined) {
+        console.warn('⚠️ createEvent retry sans video_url:', error.message)
+        const { video_url, ...mappedWithoutVideo } = mapped
+        const retry = await supabase
+            .from('events')
+            .insert(mappedWithoutVideo)
+            .select()
+            .single()
+        data = retry.data
+        error = retry.error
+    }
 
     if (error) {
         console.error('❌ Erreur createEvent:', error.message)
@@ -117,12 +134,26 @@ export async function createEvent(eventData) {
 export async function updateEvent(id, updates) {
     const mapped = toSupabaseEvent(updates)
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
         .from('events')
         .update(mapped)
         .eq('id', id)
         .select()
         .single()
+
+    // Si erreur (ex: colonne video_url inexistante), retry sans video_url
+    if (error && mapped.video_url !== undefined) {
+        console.warn('⚠️ updateEvent retry sans video_url:', error.message)
+        const { video_url, ...mappedWithoutVideo } = mapped
+        const retry = await supabase
+            .from('events')
+            .update(mappedWithoutVideo)
+            .eq('id', id)
+            .select()
+            .single()
+        data = retry.data
+        error = retry.error
+    }
 
     if (error) {
         console.error('❌ Erreur updateEvent:', error.message)
