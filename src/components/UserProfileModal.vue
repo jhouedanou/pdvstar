@@ -79,9 +79,8 @@ const handleSubmit = async () => {
 
     isLoading.value = true
     try {
-        // Mock simple auth - in production this would verify OTP
-        // Login or Register
-        userStore.authenticate({
+        // Login or Register via Supabase
+        await userStore.authenticate({
             name: formData.value.name,
             phone: formData.value.phone,
             email: '',

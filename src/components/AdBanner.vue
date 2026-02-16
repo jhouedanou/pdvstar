@@ -1,6 +1,7 @@
 <script setup>
 import { defineProps, ref } from 'vue'
 import { ExternalLink, Eye } from 'lucide-vue-next'
+import { incrementAdClick } from '../services/supabase'
 
 const props = defineProps({
     ad: {
@@ -9,19 +10,25 @@ const props = defineProps({
     }
 })
 
-const viewCount = ref(Math.floor(Math.random() * 1000) + 500) // Mock view count
+const viewCount = ref(props.ad.viewCount || Math.floor(Math.random() * 1000) + 500)
 const hasViewed = ref(false)
 
-const handleAdClick = () => {
+const handleAdClick = async () => {
     if (!hasViewed.value) {
         viewCount.value++
         hasViewed.value = true
-        // Track click analytics (could be sent to backend)
         console.log('Ad clicked:', props.ad.id, props.ad.sponsor)
+        // Track click in Supabase
+        try {
+            await incrementAdClick(props.ad.id)
+        } catch (e) {
+            console.warn('Ad click tracking failed:', e)
+        }
     }
     
-    if (props.ad.link && props.ad.link !== '#') {
-        window.open(props.ad.link, '_blank')
+    const link = props.ad.link || '#'
+    if (link && link !== '#') {
+        window.open(link, '_blank')
     }
 }
 </script>
@@ -89,7 +96,7 @@ const handleAdClick = () => {
       <!-- CTA -->
       <div class="pointer-events-auto mt-2">
         <button class="bg-yellow-400 hover:bg-yellow-500 text-black font-bold px-6 py-2.5 rounded-full text-sm shadow-lg transition-all active:scale-95 hover:shadow-xl flex items-center gap-2 group/btn">
-            <span>En savoir plus</span>
+            <span>{{ ad.ctaText || 'En savoir plus' }}</span>
             <ExternalLink class="w-4 h-4 transition-transform group-hover/btn:translate-x-0.5" />
         </button>
       </div>

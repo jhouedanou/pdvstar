@@ -9,6 +9,7 @@
   "orientation": "portrait-primary",
   "scope": "/",
   "categories": ["entertainment", "lifestyle", "social"],
+  "permissions": ["microphone"],
   "icons": [
     {
       "src": "/vite.svg",

@@ -11,6 +11,7 @@ import FeedUser from './views/FeedUser.vue'
 import CreateEventWizard from './components/CreateEventWizard.vue'
 import AdminLogin from './views/AdminLogin.vue'
 import AdminDashboard from './views/AdminDashboard.vue'
+import AdsDashboard from './views/AdsDashboard.vue'
 
 const routes = [
     { path: '/', component: FeedUser }, // Default to User Feed
@@ -18,6 +19,7 @@ const routes = [
     { path: '/pro/create', component: CreateEventWizard },
     { path: '/admin', component: AdminLogin },
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
+    { path: '/admin/ads', component: AdsDashboard, meta: { requiresAdmin: true } },
 ]
 
 const router = createRouter({
@@ -25,13 +27,26 @@ const router = createRouter({
     routes,
 })
 
-// Navigation guard for admin routes
+// Check if user is organizer from session
+const checkOrganizerSession = () => {
+    const stored = localStorage.getItem('pdvstar_session_user')
+    if (stored) {
+        try {
+            const session = JSON.parse(stored)
+            if (session.user && session.expiry && Date.now() <= session.expiry) {
+                return session.user.role === 'organizer' || session.user.role === 'admin'
+            }
+        } catch (e) { /* ignore */ }
+    }
+    return false
+}
+
+// Navigation guard for admin routes (admin OR organizer)
 router.beforeEach((to, from, next) => {
     if (to.meta.requiresAdmin) {
-        if (checkAdminSession()) {
+        if (checkAdminSession() || checkOrganizerSession()) {
             next()
         } else {
-            // Redirect to admin login if not authenticated
             next('/admin')
         }
     } else {

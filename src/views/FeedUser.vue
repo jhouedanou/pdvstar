@@ -2,8 +2,10 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
+import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import OrganizerProfile from '../components/OrganizerProfile.vue'
 import AdBanner from '../components/AdBanner.vue'
@@ -11,9 +13,12 @@ import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
 import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
 import { db } from '../services/db'
+import { fetchActiveAds } from '../services/supabase'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
+const adminStore = useAdminStore()
+const router = useRouter()
 
 const showProfileModal = ref(false)
 const sendingMessage = ref(false)
@@ -21,16 +26,43 @@ const messageError = ref('')
 const messageSuccess = ref('')
 const { coords, resume } = useGeolocation()
 
-// Get Ads from DB
+// Get Ads from Supabase (fallback to local DB)
 const ads = ref(db.getAds())
+
+// Current visible slide index (for YouTube autoplay control)
+const currentSlideIndex = ref(0)
+
+// Mute state for current event music (son activé par défaut)
+const isMuted = ref(false)
+
+// Splash screen : simule la première interaction pour débloquer l'autoplay audio
+const hasInteracted = ref(false)
+
+const enterApp = () => {
+    hasInteracted.value = true
+    // Petit délai pour laisser le DOM charger les iframes avant de lancer la lecture
+    setTimeout(() => syncYouTubePlayback(), 500)
+}
 
 // Mix events and ads (every 5 events, insert an ad)
 const feedItems = computed(() => {
     const items = []
-    const events = eventStore.events
+    const now = new Date()
+    // Filtrer les events à venir et trier du plus loin à venir au plus proche
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()) // début de journée
+    const upcomingEvents = [...eventStore.events]
+        .filter(e => {
+            if (!e.date) return false // exclure les events sans date
+            return new Date(e.date) >= today
+        })
+        .sort((a, b) => {
+            const dateA = new Date(a.date || 0)
+            const dateB = new Date(b.date || 0)
+            return dateB - dateA
+        })
     const adsList = ads.value
 
-    events.forEach((event, index) => {
+    upcomingEvents.forEach((event, index) => {
         items.push({ type: 'event', data: event })
 
         // Insert ad every 5 events
@@ -174,7 +206,20 @@ const handleWheel = (e) => {
     }
 }
 
-onMounted(() => {
+onMounted(async () => {
+    // Charger les événements depuis Supabase
+    await eventStore.loadEvents()
+
+    // Charger les publicités depuis Supabase
+    try {
+        const supaAds = await fetchActiveAds()
+        if (supaAds.length > 0) {
+            ads.value = supaAds
+        }
+    } catch (e) {
+        console.warn('Ads Supabase fallback local:', e)
+    }
+
     // Show profile modal if user doesn't have a profile
     if (!userStore.isProfileComplete) {
         showProfileModal.value = true
@@ -197,15 +242,73 @@ onMounted(() => {
     // Add wheel event listener for mouse/trackpad scroll
     if (feedContainer.value) {
         feedContainer.value.addEventListener('wheel', handleWheel, { passive: false })
+        // Détecter la slide courante au scroll (pour stopper YouTube)
+        feedContainer.value.addEventListener('scroll', handleFeedScroll, { passive: true })
     }
+
+    // La première slide a autoplay=1, les autres autoplay=0
+    // syncYouTubePlayback sera appelé au scroll pour gérer les transitions
 })
 
 onUnmounted(() => {
     // Clean up event listener
     if (feedContainer.value) {
         feedContainer.value.removeEventListener('wheel', handleWheel)
+        feedContainer.value.removeEventListener('scroll', handleFeedScroll)
     }
 })
+
+// Contrôle YouTube : src swap pour play/pause + postMessage pour mute
+const postYouTubeCommand = (iframe, func) => {
+    try {
+        iframe.contentWindow.postMessage(JSON.stringify({
+            event: 'command', func, args: ''
+        }), '*')
+    } catch (e) { /* cross-origin silencieux */ }
+}
+
+const syncYouTubePlayback = () => {
+    if (!feedContainer.value) return
+    const slides = feedContainer.value.querySelectorAll('.event-slide')
+    slides.forEach((slide, idx) => {
+        const iframes = slide.querySelectorAll('iframe[src*="youtube"]')
+        iframes.forEach(iframe => {
+            if (idx === currentSlideIndex.value) {
+                // Jouer la slide courante via postMessage (instant, pas de reload)
+                postYouTubeCommand(iframe, 'playVideo')
+                postYouTubeCommand(iframe, isMuted.value ? 'mute' : 'unMute')
+            } else {
+                // Pause les autres slides
+                postYouTubeCommand(iframe, 'pauseVideo')
+            }
+        })
+    })
+}
+
+const handleFeedScroll = () => {
+    if (!feedContainer.value) return
+    const slideHeight = feedContainer.value.clientHeight
+    const newIndex = Math.round(feedContainer.value.scrollTop / slideHeight)
+    
+    if (newIndex !== currentSlideIndex.value) {
+        currentSlideIndex.value = newIndex
+        syncYouTubePlayback()
+    }
+}
+
+// Toggle mute/unmute pour l'event actuel (via postMessage — fiable pour mute)
+const toggleMute = () => {
+    isMuted.value = !isMuted.value
+    if (!feedContainer.value) return
+    const slides = feedContainer.value.querySelectorAll('.event-slide')
+    const currentSlide = slides[currentSlideIndex.value]
+    if (!currentSlide) return
+    const iframes = currentSlide.querySelectorAll('iframe[src*="youtube"]')
+    iframes.forEach(iframe => {
+        // postMessage pour mute/unmute instantané (pas de reload iframe)
+        postYouTubeCommand(iframe, isMuted.value ? 'mute' : 'unMute')
+    })
+}
 
 const handleProfileCreated = () => {
     showProfileModal.value = false
@@ -233,6 +336,9 @@ const activeTab = computed({
         return 'feed'
     },
     set: (val) => {
+        // Si on quitte le feed, couper toutes les musiques YouTube
+        const wasFeed = !showMap.value && !showSearch.value && !showProfile.value
+        
         // Reset all
         showMap.value = false
         showSearch.value = false
@@ -241,6 +347,15 @@ const activeTab = computed({
         if (val === 'map') showMap.value = true
         if (val === 'search') showSearch.value = true
         if (val === 'profile') showProfile.value = true
+
+        // Pause YouTube quand on quitte le feed
+        if (wasFeed && val !== 'feed') {
+            pauseAllYouTube()
+        }
+        // Reprendre la musique quand on revient au feed
+        if (val === 'feed') {
+            setTimeout(() => syncYouTubePlayback(), 300)
+        }
     }
 })
 
@@ -449,7 +564,7 @@ const handleJyVais = async (event) => {
 
     // Toggle registration state persistent
     if (!event.isRegistered) {
-        eventStore.updateEvent(event.id, {
+        await eventStore.updateEvent(event.id, {
             isRegistered: true,
             participantCount: event.participantCount + 1
         })
@@ -473,7 +588,7 @@ const handleJyVais = async (event) => {
         
     } else {
         // Toggle off
-        eventStore.updateEvent(event.id, {
+        await eventStore.updateEvent(event.id, {
             isRegistered: false,
             participantCount: Math.max(0, event.participantCount - 1)
         })
@@ -564,6 +679,81 @@ const handleShare = async (event) => {
     }
 }
 
+// --- YouTube Helper ---
+/**
+ * Extraire l'ID d'une vidéo YouTube depuis une URL
+ * Supporte: youtube.com/watch?v=, youtu.be/, youtube.com/embed/
+ */
+const getYouTubeId = (url) => {
+    if (!url) return null
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+        /^([a-zA-Z0-9_-]{11})$/ // ID brut
+    ]
+    for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match) return match[1]
+    }
+    return null
+}
+
+// --- Window helpers (non accessible dans le template Vue) ---
+const appOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+
+const openExternalMap = (location) => {
+    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`, '_blank')
+}
+
+// Pause all YouTube iframes (used when leaving feed tab)
+const pauseAllYouTube = () => {
+    if (!feedContainer.value) return
+    const iframes = feedContainer.value.querySelectorAll('iframe[src*="youtube"]')
+    iframes.forEach(iframe => {
+        postYouTubeCommand(iframe, 'pauseVideo')
+    })
+}
+
+// --- Profile Edit Logic ---
+const showProfileEdit = ref(false)
+const profileEditForm = ref({
+    name: '',
+    email: '',
+    phone: ''
+})
+const profileEditLoading = ref(false)
+const profileEditSuccess = ref('')
+
+const openProfileEdit = () => {
+    if (userStore.user) {
+        profileEditForm.value = {
+            name: userStore.user.name || '',
+            email: userStore.user.email || '',
+            phone: userStore.user.phone || ''
+        }
+    }
+    showProfileEdit.value = true
+}
+
+const saveProfileEdit = async () => {
+    profileEditLoading.value = true
+    profileEditSuccess.value = ''
+    try {
+        await userStore.updateProfile({
+            name: profileEditForm.value.name,
+            email: profileEditForm.value.email
+        })
+        profileEditSuccess.value = '✅ Profil mis à jour !'
+        setTimeout(() => {
+            profileEditSuccess.value = ''
+            showProfileEdit.value = false
+        }, 1500)
+    } catch (e) {
+        console.error('Erreur update profil:', e)
+    } finally {
+        profileEditLoading.value = false
+    }
+}
+
 // --- Theme Logic ---
 const isDarkMode = ref(true)
 const toggleTheme = () => {
@@ -576,10 +766,84 @@ const toggleTheme = () => {
         localStorage.setItem('theme', 'light')
     }
 }
+
+// ============================
+// Organizer Logic
+// ============================
+const showOrganizerForm = ref(false)
+const organizerForm = ref({
+    organizerName: '',
+    spaceName: ''
+})
+const organizerError = ref('')
+const deleteConfirmId = ref(null)
+
+const handleBecomeOrganizer = async () => {
+    organizerError.value = ''
+    if (!organizerForm.value.spaceName.trim()) {
+        organizerError.value = 'Le nom de l\'espace est requis'
+        return
+    }
+    if (!organizerForm.value.organizerName.trim()) {
+        organizerError.value = 'Votre nom d\'organisateur est requis'
+        return
+    }
+
+    const success = await userStore.becomeOrganizer({
+        spaceName: organizerForm.value.spaceName,
+        organizerName: organizerForm.value.organizerName
+    })
+
+    if (success) {
+        showOrganizerForm.value = false
+        messageSuccess.value = '🎉 Vous êtes maintenant organisateur ! Redirection...'
+        setTimeout(() => {
+            messageSuccess.value = ''
+            router.push('/admin/dashboard')
+        }, 1500)
+    } else {
+        organizerError.value = 'Erreur lors de l\'inscription'
+    }
+}
+
+const myOrganizerEvents = computed(() => {
+    if (!userStore.user || !userStore.isOrganizer) return []
+    return eventStore.events
+})
+
+const handleDeleteEvent = async (eventId) => {
+    await eventStore.deleteEvent(eventId)
+    deleteConfirmId.value = null
+    messageSuccess.value = '✅ Événement supprimé'
+    setTimeout(() => messageSuccess.value = '', 3000)
+}
 </script>
 
 <template>
   <div class="responsive-container bg-black text-white relative overflow-hidden">
+
+    <!-- SPLASH SCREEN — débloque l'autoplay audio navigateur -->
+    <Transition name="splash">
+      <div 
+        v-if="!hasInteracted"
+        @click="enterApp"
+        @touchstart.passive="enterApp"
+        class="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center cursor-pointer select-none"
+      >
+        <div class="flex flex-col items-center gap-6 animate-pulse">
+          <div class="text-6xl">🎉</div>
+          <h1 class="text-4xl font-black text-primary tracking-tight">BABI VIBES</h1>
+          <p class="text-gray-400 text-sm">La nightlife d'Abidjan à portée de main</p>
+        </div>
+        <div class="mt-12 flex flex-col items-center gap-3">
+          <div class="bg-primary/20 border border-primary/40 text-primary px-8 py-3 rounded-full text-lg font-bold animate-bounce">
+            👆 Toucher pour entrer
+          </div>
+          <p class="text-gray-600 text-xs mt-2">🎵 La musique sera activée</p>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Header (Floating) -->
     <!-- Header (Standard TikTok Style) -->
     <div class="header-tabs absolute top-0 w-full z-20 pt-14 pb-4 bg-gradient-to-b from-black/80 to-transparent flex justify-center items-center gap-6 text-white font-bold drop-shadow-md pointer-events-auto transition-all duration-300">
@@ -598,7 +862,7 @@ const toggleTheme = () => {
 
     <!-- MAIN FEED VIEW -->
     <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll scroll-smooth no-scrollbar">
-      <template v-for="item in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
+      <template v-for="(item, itemIndex) in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
         <!-- AD SLIDE -->
         <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
 
@@ -606,11 +870,21 @@ const toggleTheme = () => {
         <div v-else class="event-slide snap-start h-screen w-full relative bg-dark-lighter flex items-end shrink-0">
 
         <!-- Background Image/Video -->
-        <!-- Added transition for image loading feel -->
         <div class="absolute inset-0 bg-gray-900">
-           <video v-if="item.data.type === 'video'" :src="item.data.video" autoplay loop muted playsinline class="w-full h-full object-cover opacity-100"></video>
-           <img v-else :src="item.data.image" alt="Event Cover" class="w-full h-full object-cover opacity-90" />
-           <div class="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/90"></div>
+           <!-- Event image always visible -->
+           <img :src="item.data.image" alt="Event Cover" class="w-full h-full object-cover opacity-90" />
+           <!-- YouTube Background AUDIO (iframe chargé après interaction utilisateur) -->
+           <iframe 
+             v-if="hasInteracted && item.data.backgroundMusic && getYouTubeId(item.data.backgroundMusic)"
+             :src="`https://www.youtube.com/embed/${getYouTubeId(item.data.backgroundMusic)}?autoplay=${itemIndex === 0 ? 1 : 0}&mute=${itemIndex === 0 ? 0 : 1}&loop=1&playlist=${getYouTubeId(item.data.backgroundMusic)}&controls=0&showinfo=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(appOrigin)}`"
+             class="absolute pointer-events-none"
+             style="width:1px;height:1px;opacity:0;position:absolute;bottom:0;left:0;"
+             frameborder="0"
+             allow="autoplay; encrypted-media"
+             :loading="itemIndex < 3 ? 'eager' : 'lazy'"
+           ></iframe>
+           <div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black"></div>
+           <div class="absolute bottom-0 left-0 right-0 h-[75%] bg-gradient-to-t from-black via-black/95 to-transparent"></div>
         </div>
 
         <!-- Premium Badge (Top Left) -->
@@ -662,9 +936,24 @@ const toggleTheme = () => {
              <span class="action-button-text text-xs font-semibold drop-shadow-md">Partager</span>
            </button>
 
+           <!-- Mute / Unmute Button -->
+           <button
+             v-if="item.data.backgroundMusic && getYouTubeId(item.data.backgroundMusic)"
+             @click="toggleMute"
+             class="action-button flex flex-col items-center gap-1 group"
+           >
+             <div class="w-10 h-10 rounded-full backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition"
+                  :class="isMuted ? 'bg-red-500/30' : 'bg-primary/30'">
+               <VolumeX v-if="isMuted" class="w-6 h-6 text-red-400" />
+               <Volume2 v-else class="w-6 h-6 text-primary" />
+             </div>
+             <span class="action-button-text text-xs font-semibold drop-shadow-md">{{ isMuted ? 'Muet' : '🎵 Son' }}</span>
+           </button>
+
            <!-- Spinning Disc (TikTok Vibe) -->
            <div class="mt-4 relative">
-              <div class="w-12 h-12 rounded-full bg-black border-[3px] border-dark-lighter flex items-center justify-center animate-spin-slow overflow-hidden">
+              <div class="w-12 h-12 rounded-full bg-black border-[3px] border-dark-lighter flex items-center justify-center overflow-hidden"
+                   :class="(itemIndex === currentSlideIndex && !isMuted && item.data.backgroundMusic) ? 'animate-spin-slow' : ''">
                  <img :src="item.data.image" class="w-full h-full object-cover opacity-80" />
               </div>
               <!-- Floating Notes Animation would go here -->
@@ -673,14 +962,14 @@ const toggleTheme = () => {
 
         <!-- Content Overlay (Bottom Left) -->
         <!-- mb-20 to clear the bottom navigation -->
-        <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-20 flex flex-col items-start space-y-2 pointer-events-none">
-          <!-- Promo Label -->
-          <div v-if="!item.data.isPremium" class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
-            🔥 2 achetées = 1 offerte
+        <div class="event-content relative z-10 w-full pl-4 pr-16 pb-6 mb-20 flex flex-col items-start space-y-2.5 pointer-events-none">
+          <!-- Promo Label (dynamique depuis la DB) -->
+          <div v-if="item.data.promoText" class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
+            🔥 {{ item.data.promoText }}
           </div>
 
           <!-- Premium Price Tag -->
-          <div v-else class="bg-gradient-to-r from-yellow-400 to-orange-500 text-black px-4 py-1.5 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg inline-flex items-center gap-2">
+          <div v-if="item.data.isPremium" class="bg-gradient-to-r from-yellow-400 to-orange-500 text-black px-4 py-1.5 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg inline-flex items-center gap-2">
             <Crown class="w-4 h-4" />
             <span>{{ item.data.price?.toLocaleString() }} CFA</span>
           </div>
@@ -699,20 +988,21 @@ const toggleTheme = () => {
             {{ item.data.description || 'Découvrez cet événement incontournable!' }}
           </p>
 
-          <!-- Premium Features -->
-          <div v-if="item.data.isPremium && item.data.features?.length" class="flex flex-wrap gap-1.5 w-[85%]">
+          <!-- Features Tags -->
+          <div v-if="item.data.features?.length" class="flex flex-wrap gap-1.5 w-[85%]">
             <span v-for="feature in item.data.features" :key="feature" class="bg-white/20 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full font-medium">
                 ✨ {{ feature }}
             </span>
           </div>
 
           <!-- Music Ticker -->
-          <div class="music-ticker flex items-center gap-2 w-[70%] overflow-hidden">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 fill-white animate-pulse" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          <div class="music-ticker flex items-center gap-2 w-[70%] overflow-hidden pointer-events-auto">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 fill-white flex-shrink-0" :class="item.data.backgroundMusic ? 'animate-spin-slow' : 'animate-pulse'" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
               <div class="whitespace-nowrap animate-marquee text-xs font-medium">
-                  <span class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
-                  <span class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
-                  <span class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
+                  <span v-if="item.data.backgroundMusic" class="mr-4">🎵 {{ item.data.musicTitle || 'Musique de fond' }}</span>
+                  <span v-if="item.data.backgroundMusic" class="mr-4">🎵 {{ item.data.musicTitle || 'Musique de fond' }}</span>
+                  <span v-if="!item.data.backgroundMusic" class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
+                  <span v-if="!item.data.backgroundMusic" class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
               </div>
           </div>
         </div>
@@ -922,15 +1212,240 @@ const toggleTheme = () => {
             </div>
 
             <div class="p-6 pb-32">
-                 <!-- Create Action -->
-                 <div class="bg-gradient-to-r from-primary to-purple-600 rounded-2xl p-4 mb-8 text-black flex items-center justify-between shadow-lg shadow-primary/20 cursor-pointer hover:scale-[1.02] transition">
-                    <div>
-                        <h3 class="font-bold text-lg">Organiser un événement</h3>
-                        <p class="text-xs opacity-80">Devenir un créateur</p>
-                    </div>
-                    <div class="bg-black/20 p-2 rounded-full">
-                        <Plus class="w-6 h-6 text-black" />
-                    </div>
+                 <!-- SECTION INFOS PROFIL -->
+                 <div class="mb-6">
+                   <div class="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden transition-colors duration-300">
+                     <!-- User Info Card -->
+                     <div class="p-4 flex items-center gap-4">
+                       <div class="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-primary">
+                         <img v-if="userStore.user?.avatar" :src="userStore.user.avatar" class="w-full h-full object-cover" />
+                         <UserCircle v-else class="w-10 h-10 text-primary" />
+                       </div>
+                       <div class="flex-1 min-w-0">
+                         <h3 class="font-bold text-lg text-gray-900 dark:text-white truncate">{{ userStore.user?.name || 'Visiteur' }}</h3>
+                         <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ userStore.user?.email || 'Pas d\'email' }}</p>
+                         <p class="text-xs text-gray-400 dark:text-gray-500">📱 {{ userStore.user?.phone || 'Non renseigné' }}</p>
+                       </div>
+                       <button @click="openProfileEdit" class="p-2 bg-gray-100 dark:bg-gray-800 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition flex-shrink-0">
+                         <Edit class="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                       </button>
+                     </div>
+
+                     <!-- Profile Edit Form (Accordion) -->
+                     <transition name="fade">
+                       <div v-if="showProfileEdit" class="border-t border-gray-200 dark:border-gray-800 p-4 space-y-3 bg-gray-50 dark:bg-gray-900/50">
+                         <div>
+                           <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Nom</label>
+                           <input 
+                             v-model="profileEditForm.name" 
+                             type="text" 
+                             placeholder="Votre nom" 
+                             class="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary transition"
+                           />
+                         </div>
+                         <div>
+                           <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Email</label>
+                           <input 
+                             v-model="profileEditForm.email" 
+                             type="email" 
+                             placeholder="votre@email.com" 
+                             class="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary transition"
+                           />
+                         </div>
+                         <div>
+                           <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Téléphone</label>
+                           <input 
+                             v-model="profileEditForm.phone" 
+                             type="tel" 
+                             disabled
+                             class="w-full bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-400 cursor-not-allowed"
+                           />
+                           <p class="text-[10px] text-gray-400 mt-1">Le téléphone ne peut pas être modifié (identifiant unique)</p>
+                         </div>
+                         <div v-if="profileEditSuccess" class="bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm p-3 rounded-xl text-center font-medium">
+                           {{ profileEditSuccess }}
+                         </div>
+                         <div class="flex gap-2">
+                           <button 
+                             @click="saveProfileEdit" 
+                             :disabled="profileEditLoading"
+                             class="flex-1 bg-primary hover:bg-primary/90 disabled:bg-gray-400 text-black font-bold py-3 rounded-xl transition flex items-center justify-center gap-2"
+                           >
+                             <Check class="w-4 h-4" />
+                             <span v-if="!profileEditLoading">Enregistrer</span>
+                             <span v-else>Sauvegarde...</span>
+                           </button>
+                           <button 
+                             @click="showProfileEdit = false" 
+                             class="px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium"
+                           >
+                             Annuler
+                           </button>
+                         </div>
+                       </div>
+                     </transition>
+
+                     <!-- Quick Actions -->
+                     <div class="border-t border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2">
+                       <!-- Admin Dashboard Button -->
+                       <button 
+                         v-if="adminStore.isAuthenticated"
+                         @click="router.push('/admin/dashboard')" 
+                         class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-red-500/20"
+                       >
+                         <Shield class="w-5 h-5" />
+                         🛡️ Admin Dashboard
+                       </button>
+                       <!-- Admin Login Button (non-admin) -->
+                       <button 
+                         v-else
+                         @click="router.push('/admin')" 
+                         class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                       >
+                         <LogIn class="w-4 h-4" />
+                         Connexion Admin
+                       </button>
+                       <!-- Organizer Quick Actions -->
+                       <div v-if="userStore.isOrganizer" class="flex gap-2">
+                         <button 
+                           @click="router.push('/admin/dashboard')" 
+                           class="flex-1 bg-primary/10 hover:bg-primary/20 text-primary font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm"
+                         >
+                           <Calendar class="w-4 h-4" />
+                           Gérer mes événements
+                         </button>
+                         <button 
+                           @click="router.push('/admin/ads')" 
+                           class="flex-1 bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm"
+                         >
+                           <Store class="w-4 h-4" />
+                           Mes publicités
+                         </button>
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+
+                 <!-- SECTION ORGANISATEUR -->
+                 <div v-if="userStore.isOrganizer" class="mb-8">
+                   <!-- Header Espace Organisateur -->
+                   <div class="bg-gradient-to-r from-primary to-purple-600 rounded-2xl p-4 mb-4 text-black">
+                     <div class="flex items-center justify-between">
+                       <div>
+                         <h3 class="font-bold text-lg flex items-center gap-2"><Store class="w-5 h-5" /> {{ userStore.user?.spaceName || 'Mon Espace' }}</h3>
+                         <p class="text-xs opacity-80">Organisateur — {{ myOrganizerEvents.length }} événement(s)</p>
+                       </div>
+                       <button @click="router.push('/admin/dashboard')" class="bg-black/20 hover:bg-black/30 text-black px-3 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5">
+                         <Plus class="w-4 h-4" /> Créer
+                       </button>
+                     </div>
+                   </div>
+
+                   <!-- Liste des événements de l'organisateur -->
+                   <div v-if="myOrganizerEvents.length > 0" class="space-y-3 mb-4">
+                     <div v-for="event in myOrganizerEvents.slice(0, 5)" :key="'org-'+event.id" class="flex gap-3 bg-white dark:bg-gray-900 p-3 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm transition-colors duration-300">
+                       <div class="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-800 flex-shrink-0 overflow-hidden">
+                         <img :src="event.image" class="w-full h-full object-cover" />
+                       </div>
+                       <div class="flex-1 min-w-0">
+                         <h4 class="font-bold text-gray-900 dark:text-white text-sm truncate">{{ event.title }}</h4>
+                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">📅 {{ new Date(event.date).toLocaleDateString('fr-FR') }} • 📍 {{ event.location?.split(',')[0] }}</p>
+                         <div class="flex items-center gap-1.5 mt-1.5">
+                           <span class="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full font-medium">{{ event.participantCount || 0 }} inscrits</span>
+                           <span v-if="event.isPremium" class="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-medium">Premium</span>
+                         </div>
+                       </div>
+                       <div class="flex flex-col gap-1 flex-shrink-0">
+                         <button @click="router.push('/admin/dashboard')" class="p-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                           <Edit class="w-3.5 h-3.5 text-gray-600 dark:text-gray-400" />
+                         </button>
+                         <button v-if="deleteConfirmId !== event.id" @click="deleteConfirmId = event.id" class="p-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition">
+                           <Trash2 class="w-3.5 h-3.5 text-gray-600 dark:text-red-400" />
+                         </button>
+                         <div v-else class="flex flex-col gap-1">
+                           <button @click="handleDeleteEvent(event.id)" class="p-1.5 bg-red-500 rounded-lg">
+                             <Check class="w-3.5 h-3.5 text-white" />
+                           </button>
+                           <button @click="deleteConfirmId = null" class="p-1.5 bg-gray-300 dark:bg-gray-700 rounded-lg">
+                             <X class="w-3.5 h-3.5 text-gray-700 dark:text-gray-300" />
+                           </button>
+                         </div>
+                       </div>
+                     </div>
+                     <!-- Voir tout -->
+                     <button v-if="myOrganizerEvents.length > 5" @click="router.push('/admin/dashboard')" class="w-full text-center text-sm text-primary font-medium py-2 hover:underline">
+                       Voir tous les événements ({{ myOrganizerEvents.length }})
+                     </button>
+                   </div>
+
+                   <!-- Aucun événement -->
+                   <div v-else class="text-center py-8 bg-white dark:bg-gray-900 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
+                     <p class="text-gray-500 mb-3">Aucun événement créé pour le moment</p>
+                     <button @click="router.push('/admin/dashboard')" class="bg-primary text-black font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2 hover:bg-primary/90 transition text-sm">
+                       <Plus class="w-4 h-4" /> Créer mon premier événement
+                     </button>
+                   </div>
+                 </div>
+
+                 <!-- DEVENIR ORGANISATEUR (non-organisateur) -->
+                 <div v-else class="mb-8">
+                   <div 
+                     @click="showOrganizerForm = !showOrganizerForm"
+                     class="bg-gradient-to-r from-primary to-purple-600 rounded-2xl p-4 text-black flex items-center justify-between shadow-lg shadow-primary/20 cursor-pointer hover:scale-[1.02] transition"
+                   >
+                     <div>
+                       <h3 class="font-bold text-lg">Organiser un événement</h3>
+                       <p class="text-xs opacity-80">Devenir organisateur — c'est gratuit !</p>
+                     </div>
+                     <div class="bg-black/20 p-2 rounded-full">
+                       <Plus class="w-6 h-6 text-black" :class="showOrganizerForm ? 'rotate-45' : ''" style="transition: transform 0.3s" />
+                     </div>
+                   </div>
+
+                   <!-- Formulaire devenir organisateur -->
+                   <transition name="fade">
+                     <div v-if="showOrganizerForm" class="mt-4 bg-white dark:bg-gray-900 rounded-2xl p-5 border border-gray-200 dark:border-gray-800 shadow-sm">
+                       <h4 class="font-bold text-gray-900 dark:text-white mb-1">Créer votre espace organisateur</h4>
+                       <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Remplissez ce formulaire pour commencer à créer des événements</p>
+                       
+                       <div class="space-y-3">
+                         <!-- Nom de l'organisateur -->
+                         <div>
+                           <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Votre nom d'organisateur</label>
+                           <input 
+                             v-model="organizerForm.organizerName"
+                             type="text" 
+                             :placeholder="userStore.user?.name || 'Ex: DJ Arafat Events'"
+                             class="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary transition"
+                           />
+                         </div>
+                         <!-- Nom de l'espace -->
+                         <div>
+                           <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Nom de votre espace / organisation</label>
+                           <input 
+                             v-model="organizerForm.spaceName"
+                             type="text" 
+                             placeholder="Ex: Babi Events, Le Spot VIP..."
+                             class="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary transition"
+                           />
+                         </div>
+                         <!-- Error -->
+                         <div v-if="organizerError" class="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-3 rounded-xl text-center font-medium">
+                           {{ organizerError }}
+                         </div>
+                         <!-- Submit -->
+                         <button 
+                           @click="handleBecomeOrganizer"
+                           :disabled="userStore.isLoading"
+                           class="w-full bg-primary hover:bg-primary/90 disabled:bg-gray-700 text-black font-bold py-3 rounded-xl transition hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
+                         >
+                           <Store class="w-5 h-5" />
+                           <span v-if="!userStore.isLoading">Devenir organisateur 🚀</span>
+                           <span v-else>Création en cours...</span>
+                         </button>
+                       </div>
+                     </div>
+                   </transition>
                  </div>
 
                  <!-- Calendar Section -->
@@ -1000,6 +1515,7 @@ const toggleTheme = () => {
            <UserCircle class="w-6 h-6" />
            <span class="text-[10px] font-bold">Profil</span>
         </button>
+
     </div>
 
     <!-- User Profile Modal -->
@@ -1105,7 +1621,7 @@ const toggleTheme = () => {
                 <!-- Footer Actions -->
                 <div class="p-4 border-t border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row gap-3">
                     <button
-                        @click="window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(googleMapsLocation)}`, '_blank')"
+                        @click="openExternalMap(googleMapsLocation)"
                         class="flex-1 bg-primary text-black font-bold py-3 px-4 rounded-xl hover:bg-primary/90 transition active:scale-95 flex items-center justify-center gap-2"
                     >
                         <MapIcon class="w-5 h-5" />
@@ -1159,5 +1675,13 @@ const toggleTheme = () => {
 }
 .up-enter-from, .up-leave-to {
   transform: translateY(100%);
+}
+/* Splash screen transition */
+.splash-leave-active {
+    transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.splash-leave-to {
+    opacity: 0;
+    transform: scale(1.1);
 }
 </style>

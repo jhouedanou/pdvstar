@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { db } from '../services/db'
+import {
+    findUserByPhone as supaFindUserByPhone,
+    createUser as supaCreateUser,
+    updateUser as supaUpdateUser
+} from '../services/supabase'
 
 export const useUserStore = defineStore('user', () => {
     // Load current session from localStorage (pointer to logged in user)
@@ -19,37 +24,65 @@ export const useUserStore = defineStore('user', () => {
     }
 
     const user = ref(loadSession())
+    const isLoading = ref(false)
 
     const isProfileComplete = computed(() => {
         return user.value && user.value.name && user.value.phone
     })
 
-    // This now acts as Login OR Register
-    const authenticate = (profileData) => {
-        let existingUser = db.findUserByPhone(profileData.phone)
+    /**
+     * Login OR Register via Supabase, avec fallback local
+     */
+    const authenticate = async (profileData) => {
+        isLoading.value = true
+        let currentUser = null
 
-        let currentUser;
-        if (existingUser) {
-            // Login
-            currentUser = existingUser
-        } else {
-            // Register
-            currentUser = db.createUser({
-                name: profileData.name || `Utilisateur ${profileData.phone}`,
-                phone: profileData.phone,
-                email: profileData.email || '',
-                avatar: profileData.avatar || null,
-                following: [],
-                role: 'user'
-            })
+        try {
+            // 1. Chercher l'utilisateur par téléphone dans Supabase
+            const existingUser = await supaFindUserByPhone(profileData.phone)
+
+            if (existingUser) {
+                // Login — utilisateur existant
+                currentUser = existingUser
+            } else {
+                // Register — créer un nouvel utilisateur dans Supabase
+                currentUser = await supaCreateUser({
+                    name: profileData.name || `Utilisateur ${profileData.phone}`,
+                    phone: profileData.phone,
+                    email: profileData.email || '',
+                    avatar: profileData.avatar || null,
+                    following: [],
+                    role: 'user'
+                })
+            }
+        } catch (error) {
+            console.error('❌ Erreur Supabase auth, fallback local:', error)
+        }
+
+        // Fallback local si Supabase échoue
+        if (!currentUser) {
+            let existingLocal = db.findUserByPhone(profileData.phone)
+            if (existingLocal) {
+                currentUser = existingLocal
+            } else {
+                currentUser = db.createUser({
+                    name: profileData.name || `Utilisateur ${profileData.phone}`,
+                    phone: profileData.phone,
+                    email: profileData.email || '',
+                    avatar: profileData.avatar || null,
+                    following: [],
+                    role: 'user'
+                })
+            }
         }
 
         user.value = currentUser
         saveSession()
+        isLoading.value = false
         return user.value
     }
 
-    const toggleFollow = (organizerName) => {
+    const toggleFollow = async (organizerName) => {
         if (!user.value) return
 
         if (!user.value.following) {
@@ -63,8 +96,14 @@ export const useUserStore = defineStore('user', () => {
             user.value.following.splice(idx, 1)
         }
 
-        // Persist
-        db.updateUser(user.value.id, { following: user.value.following })
+        // Persist to Supabase
+        try {
+            await supaUpdateUser(user.value.id, { following: user.value.following })
+        } catch (error) {
+            console.error('❌ Erreur update following Supabase:', error)
+            // Fallback local
+            db.updateUser(user.value.id, { following: user.value.following })
+        }
         saveSession()
     }
 
@@ -77,21 +116,48 @@ export const useUserStore = defineStore('user', () => {
         localStorage.setItem('pdvstar_session_user', JSON.stringify(session))
     }
 
-    const updateProfile = (updates) => {
+    const updateProfile = async (updates) => {
         if (user.value) {
-            const updated = db.updateUser(user.value.id, updates)
+            let updated = null
+            try {
+                updated = await supaUpdateUser(user.value.id, updates)
+            } catch (error) {
+                console.error('❌ Erreur update profile Supabase:', error)
+                updated = db.updateUser(user.value.id, updates)
+            }
+
             if (updated) {
                 user.value = updated
-                // Update session keeping expiry
                 const stored = localStorage.getItem('pdvstar_session_user')
                 const currentSession = stored ? JSON.parse(stored) : { expiry: Date.now() + (7 * 24 * 60 * 60 * 1000) }
-
                 const newSession = {
                     ...currentSession,
                     user: updated
                 }
                 localStorage.setItem('pdvstar_session_user', JSON.stringify(newSession))
             }
+        }
+    }
+
+    const isOrganizer = computed(() => {
+        return user.value && (user.value.role === 'organizer' || user.value.role === 'admin')
+    })
+
+    const becomeOrganizer = async (organizerData) => {
+        if (!user.value) return false
+        isLoading.value = true
+        try {
+            await updateProfile({
+                role: 'organizer',
+                spaceName: organizerData.spaceName,
+                organizerName: organizerData.organizerName || user.value.name
+            })
+            isLoading.value = false
+            return true
+        } catch (error) {
+            console.error('❌ Erreur devenir organisateur:', error)
+            isLoading.value = false
+            return false
         }
     }
 
@@ -102,10 +168,13 @@ export const useUserStore = defineStore('user', () => {
 
     return {
         user,
+        isLoading,
         isProfileComplete,
+        isOrganizer,
         authenticate,
         updateProfile,
         toggleFollow,
+        becomeOrganizer,
         logout
     }
 })
