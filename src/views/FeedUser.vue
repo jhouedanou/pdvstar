@@ -164,18 +164,12 @@ const scrollToEvent = async (id) => {
 // Wheel scroll handling for feed
 const feedContainer = ref(null)
 let isScrolling = false
-let scrollTimeout = null
 
 const handleWheel = (e) => {
     if (!feedContainer.value) return
     
     // Prevent default scroll behavior
     e.preventDefault()
-    
-    // Clear previous timeout
-    if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-    }
     
     // Avoid multiple rapid scrolls
     if (isScrolling) return
@@ -186,23 +180,26 @@ const handleWheel = (e) => {
     if (Math.abs(delta) > threshold) {
         isScrolling = true
         
-        // Scroll to next/previous slide
         const container = feedContainer.value
         const slideHeight = container.clientHeight
-        const currentScroll = container.scrollTop
         const direction = delta > 0 ? 1 : -1
-        const targetScroll = currentScroll + (slideHeight * direction)
         
-        // Smooth scroll to target
-        container.scrollTo({
-            top: targetScroll,
-            behavior: 'smooth'
-        })
+        // Calculer l'index cible basé sur la slide courante (pas le scrollTop brut)
+        const targetIndex = Math.max(0, Math.min(feedItems.value.length - 1, currentSlideIndex.value + direction))
+        
+        if (targetIndex !== currentSlideIndex.value) {
+            currentSlideIndex.value = targetIndex
+            container.scrollTo({
+                top: targetIndex * slideHeight,
+                behavior: 'smooth'
+            })
+            syncYouTubePlayback()
+        }
         
         // Reset scrolling flag after animation
         setTimeout(() => {
             isScrolling = false
-        }, 800)
+        }, 600)
     }
 }
 
@@ -878,7 +875,7 @@ const handleDeleteEvent = async (eventId) => {
     </div>
 
     <!-- MAIN FEED VIEW -->
-    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll scroll-smooth no-scrollbar">
+    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll no-scrollbar">
       <template v-for="(item, itemIndex) in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
         <!-- AD SLIDE -->
         <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
