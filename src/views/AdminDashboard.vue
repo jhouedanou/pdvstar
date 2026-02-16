@@ -8,7 +8,7 @@ import {
     LogOut, Plus, Edit, Trash2, Calendar, MapPin,
     X, Check, Camera, Save, ArrowLeft, Mic, MicOff, Volume2,
     Search, Loader2, Navigation, Tag, Store, Megaphone,
-    Video, SwitchCamera, Locate, CameraOff
+    Video, SwitchCamera, Locate, CameraOff, Image, Play, Link
 } from 'lucide-vue-next'
 import L from 'leaflet'
 
@@ -271,7 +271,9 @@ const defaultForm = () => ({
     features: [],
     backgroundMusic: '',
     musicTitle: '',
-    promoText: ''
+    promoText: '',
+    mediaType: 'image',
+    videoUrl: ''
 })
 
 const form = ref(defaultForm())
@@ -362,6 +364,8 @@ const createEvent = async () => {
         backgroundMusic: form.value.backgroundMusic || '',
         musicTitle: form.value.musicTitle || '',
         promoText: form.value.promoText || '',
+        mediaType: form.value.mediaType || 'image',
+        videoUrl: form.value.videoUrl || '',
         createdBy: userStore.user?.id || null,
         distance: '0 km'
     })
@@ -385,7 +389,9 @@ const openEditModal = (event) => {
         features: event.features ? [...event.features] : [],
         backgroundMusic: event.backgroundMusic || '',
         musicTitle: event.musicTitle || '',
-        promoText: event.promoText || ''
+        promoText: event.promoText || '',
+        mediaType: event.mediaType || 'image',
+        videoUrl: event.videoUrl || ''
     }
     showEditModal.value = true
 }
@@ -406,7 +412,9 @@ const updateEvent = async () => {
             features: form.value.features || [],
             backgroundMusic: form.value.backgroundMusic || '',
             musicTitle: form.value.musicTitle || '',
-            promoText: form.value.promoText || ''
+            promoText: form.value.promoText || '',
+            mediaType: form.value.mediaType || 'image',
+            videoUrl: form.value.videoUrl || ''
         })
         closeModals()
     }
@@ -851,6 +859,39 @@ const extractYouTubeId = (url) => {
     }
     return null
 }
+
+/**
+ * Extraire l'ID d'une vidéo TikTok depuis une URL
+ * Supporte: tiktok.com/@user/video/ID, vm.tiktok.com/ID
+ */
+const extractTikTokId = (url) => {
+    if (!url) return null
+    const patterns = [
+        /tiktok\.com\/@[^/]+\/video\/(\d+)/,
+        /vm\.tiktok\.com\/([a-zA-Z0-9]+)/,
+        /tiktok\.com\/t\/([a-zA-Z0-9]+)/
+    ]
+    for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match) return match[1]
+    }
+    return null
+}
+
+/**
+ * Valider l'URL vidéo en fonction du type sélectionné
+ */
+const isVideoUrlValid = computed(() => {
+    if (form.value.mediaType === 'image') return true
+    if (!form.value.videoUrl) return false
+    if (form.value.mediaType === 'youtube' || form.value.mediaType === 'youtube_short') {
+        return !!extractYouTubeId(form.value.videoUrl)
+    }
+    if (form.value.mediaType === 'tiktok') {
+        return !!extractTikTokId(form.value.videoUrl)
+    }
+    return false
+})
 
 /**
  * Récupérer automatiquement le titre d'une vidéo YouTube via oEmbed
