@@ -44,25 +44,37 @@ const enterApp = () => {
     setTimeout(() => syncYouTubePlayback(), 500)
 }
 
+// Helper : date label pour bandeaux
+const getDateLabel = (dateStr) => {
+    const eventDate = new Date(dateStr)
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+    const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate())
+    if (eventDay.getTime() === today.getTime()) return 'today'
+    if (eventDay.getTime() === tomorrow.getTime()) return 'tomorrow'
+    return eventDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
+const getDateDisplayText = (dateStr) => {
+    const label = getDateLabel(dateStr)
+    if (label === 'today') return "Aujourd'hui"
+    if (label === 'tomorrow') return 'Demain'
+    return label
+}
+
 // Mix events and ads (every 5 events, insert an ad)
 const feedItems = computed(() => {
     const items = []
     const now = new Date()
-    // Séparer les events à venir et passés
-    const sortedEvents = [...eventStore.events]
-        .filter(e => !!e.date)
-        .sort((a, b) => {
-            const dateA = new Date(a.date || 0)
-            const dateB = new Date(b.date || 0)
-            const diffA = dateA - now
-            const diffB = dateB - now
-            // Events à venir d'abord (les plus proches en premier), puis passés (les plus récents en premier)
-            if (diffA >= 0 && diffB >= 0) return diffA - diffB  // à venir : plus proche d'abord
-            if (diffA < 0 && diffB < 0) return diffB - diffA     // passés : plus récent d'abord
-            if (diffA >= 0) return -1                             // à venir avant passé
-            return 1
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()) // début de journée
+    // Filtrer uniquement les events à venir (aujourd'hui inclus), triés du plus proche au plus lointain
+    const upcomingEvents = [...eventStore.events]
+        .filter(e => {
+            if (!e.date) return false
+            return new Date(e.date) >= today
         })
-    const upcomingEvents = sortedEvents
+        .sort((a, b) => new Date(a.date) - new Date(b.date)) // plus proche d'abord
     const adsList = ads.value
 
     upcomingEvents.forEach((event, index) => {
@@ -1019,14 +1031,14 @@ const handleDeleteEvent = async (eventId) => {
           <div class="max-w-[85%]">
             <h2 class="text-2xl font-bold leading-tight mb-1 text-white text-shadow">{{ item.data.title }}</h2>
             <!-- Date de l'événement -->
-            <div v-if="item.data.date" class="flex items-center gap-1.5 mb-1">
+            <div v-if="item.data.date" class="flex items-center gap-1.5 mb-1 flex-wrap">
               <Calendar class="w-4 h-4 text-primary" />
-              <span class="text-sm font-semibold" :class="new Date(item.data.date) >= new Date() ? 'text-primary' : 'text-gray-400'">
-                {{ new Date(item.data.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) }}
+              <span class="text-sm font-semibold text-primary">
+                {{ getDateDisplayText(item.data.date) }}
                 à {{ new Date(item.data.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) }}
               </span>
-              <span v-if="new Date(item.data.date) < new Date()" class="bg-gray-500/40 text-gray-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">PASSÉ</span>
-              <span v-else-if="(new Date(item.data.date) - new Date()) < 86400000" class="bg-red-500/40 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse">AUJOURD'HUI</span>
+              <span v-if="getDateLabel(item.data.date) === 'today'" class="bg-red-500/40 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse">🔴 AUJOURD'HUI</span>
+              <span v-else-if="getDateLabel(item.data.date) === 'tomorrow'" class="bg-orange-500/40 text-orange-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">⏰ DEMAIN</span>
             </div>
             <div class="flex items-center text-gray-200 font-medium text-sm gap-2">
                 <span class="flex items-center text-primary"><MapPin class="w-4 h-4 mr-0.5"/> {{ item.data.location }}</span>
