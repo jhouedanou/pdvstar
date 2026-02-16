@@ -1005,7 +1005,16 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
           :key="event.id"
           class="bg-surface rounded-xl overflow-hidden border border-gray-800 hover:border-gray-700 transition"
         >
-          <img :src="event.image" :alt="event.title" class="w-full h-40 object-cover" />
+          <img v-if="!event.mediaType || event.mediaType === 'image'" :src="event.image" :alt="event.title" class="w-full h-40 object-cover" />
+          <div v-else class="relative w-full h-40 bg-gray-900 flex items-center justify-center">
+            <img v-if="event.image" :src="event.image" :alt="event.title" class="w-full h-full object-cover opacity-60" />
+            <div class="absolute inset-0 flex items-center justify-center">
+              <div class="bg-black/60 px-3 py-1.5 rounded-full flex items-center gap-2 text-white text-xs font-bold">
+                <Play class="w-4 h-4" />
+                {{ event.mediaType === 'youtube' ? 'YouTube' : event.mediaType === 'youtube_short' ? 'YT Short' : 'TikTok' }}
+              </div>
+            </div>
+          </div>
           <div class="p-4">
             <h3 class="font-bold text-white truncate">{{ event.title }}</h3>
             <div class="flex items-center gap-2 text-gray-400 text-sm mt-1">
@@ -1097,8 +1106,87 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
               🎤 Parlez maintenant... (champ : {{ recordingField === 'title' ? 'Titre' : recordingField === 'description' ? 'Description' : recordingField === 'location' ? 'Lieu' : recordingField === 'organizer' ? 'Organisateur' : recordingField === 'musicTitle' ? 'Titre musique' : recordingField === 'customTag' ? 'Tag' : recordingField }})
             </div>
 
-            <!-- Image -->
+            <!-- Type de média -->
             <div>
+              <label class="block text-gray-400 text-sm mb-2">Type d'illustration</label>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  @click="form.mediaType = 'image'"
+                  class="px-3 py-2.5 rounded-xl text-xs font-medium transition border flex flex-col items-center gap-1.5"
+                  :class="form.mediaType === 'image' ? 'bg-primary/20 text-primary border-primary/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
+                >
+                  <Image class="w-5 h-5" />
+                  Image
+                </button>
+                <button
+                  type="button"
+                  @click="form.mediaType = 'youtube'"
+                  class="px-3 py-2.5 rounded-xl text-xs font-medium transition border flex flex-col items-center gap-1.5"
+                  :class="form.mediaType === 'youtube' ? 'bg-red-500/20 text-red-400 border-red-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
+                >
+                  <Play class="w-5 h-5" />
+                  YouTube
+                </button>
+                <button
+                  type="button"
+                  @click="form.mediaType = 'youtube_short'"
+                  class="px-3 py-2.5 rounded-xl text-xs font-medium transition border flex flex-col items-center gap-1.5"
+                  :class="form.mediaType === 'youtube_short' ? 'bg-red-500/20 text-red-400 border-red-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
+                >
+                  <Play class="w-5 h-5" />
+                  YT Short
+                </button>
+                <button
+                  type="button"
+                  @click="form.mediaType = 'tiktok'"
+                  class="px-3 py-2.5 rounded-xl text-xs font-medium transition border flex flex-col items-center gap-1.5"
+                  :class="form.mediaType === 'tiktok' ? 'bg-pink-500/20 text-pink-400 border-pink-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
+                >
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 0010.86 4.43v-7.15a8.16 8.16 0 005.58 2.2V11.2a4.85 4.85 0 01-3.77-1.74V6.69h3.77z"/></svg>
+                  TikTok
+                </button>
+              </div>
+            </div>
+
+            <!-- Video URL (YouTube / YouTube Short / TikTok) -->
+            <div v-if="form.mediaType !== 'image'">
+              <label class="block text-gray-400 text-sm mb-2">
+                <Link class="w-4 h-4 inline" />
+                URL de la vidéo *
+                <span class="text-gray-600 text-xs">
+                  {{ form.mediaType === 'youtube' ? '(youtube.com/watch?v=...)' : form.mediaType === 'youtube_short' ? '(youtube.com/shorts/...)' : '(tiktok.com/@user/video/...)' }}
+                </span>
+              </label>
+              <input
+                v-model="form.videoUrl"
+                type="url"
+                :placeholder="form.mediaType === 'youtube' ? 'https://www.youtube.com/watch?v=...' : form.mediaType === 'youtube_short' ? 'https://www.youtube.com/shorts/...' : 'https://www.tiktok.com/@user/video/...'"
+                class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-primary focus:outline-none transition"
+              />
+              <!-- YouTube Preview -->
+              <div v-if="(form.mediaType === 'youtube' || form.mediaType === 'youtube_short') && form.videoUrl && extractYouTubeId(form.videoUrl)" class="mt-2 rounded-xl overflow-hidden border border-gray-700">
+                <iframe
+                  :src="`https://www.youtube.com/embed/${extractYouTubeId(form.videoUrl)}?rel=0`"
+                  class="w-full h-48"
+                  frameborder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowfullscreen
+                ></iframe>
+              </div>
+              <!-- TikTok Preview -->
+              <div v-if="form.mediaType === 'tiktok' && form.videoUrl && extractTikTokId(form.videoUrl)" class="mt-2 rounded-xl overflow-hidden border border-gray-700 bg-gray-900 p-3 text-center">
+                <p class="text-gray-400 text-xs mb-2">✅ TikTok ID détecté : {{ extractTikTokId(form.videoUrl) }}</p>
+                <p class="text-gray-500 text-[10px]">La vidéo TikTok sera intégrée dans le feed</p>
+              </div>
+              <!-- Invalid URL warning -->
+              <div v-if="form.videoUrl && !isVideoUrlValid" class="mt-1 text-red-400 text-xs">
+                ⚠️ URL invalide pour le type sélectionné.
+              </div>
+            </div>
+
+            <!-- Image (seulement si type image) -->
+            <div v-if="form.mediaType === 'image'">
               <label class="block text-gray-400 text-sm mb-2">Image de l'événement</label>
               <!-- Preview si image sélectionnée -->
               <div v-if="form.preview" class="relative w-full h-40 bg-gray-900 border-2 border-gray-700 rounded-xl overflow-hidden mb-2">
@@ -1146,6 +1234,28 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                   <Video class="w-4 h-4" />
                   Remplacer (caméra)
                 </button>
+              </div>
+            </div>
+
+            <!-- Image de couverture (pour vidéos — optionnelle) -->
+            <div v-if="form.mediaType !== 'image'">
+              <label class="block text-gray-400 text-sm mb-2">Image de couverture <span class="text-gray-600 text-xs">(optionnelle, pour miniatures)</span></label>
+              <div v-if="form.preview" class="relative w-full h-32 bg-gray-900 border-2 border-gray-700 rounded-xl overflow-hidden mb-2">
+                <img :src="form.preview" class="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  @click="form.preview = ''; form.image = ''"
+                  class="absolute top-2 right-2 bg-black/60 text-white p-1.5 rounded-full hover:bg-red-500/80 transition"
+                >
+                  <X class="w-4 h-4" />
+                </button>
+              </div>
+              <div v-if="!form.preview" class="flex gap-2">
+                <label class="flex-1 bg-gray-800 text-gray-300 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-700 hover:text-primary transition flex items-center justify-center gap-2 text-sm">
+                  <Camera class="w-4 h-4" />
+                  Ajouter une couverture
+                  <input type="file" accept="image/*" @change="handleImageChange" class="hidden" />
+                </label>
               </div>
             </div>
 

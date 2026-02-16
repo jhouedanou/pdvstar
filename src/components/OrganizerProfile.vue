@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
-import { Users, Calendar, MapPin, Heart, X, Check, Clock, Share2, Crown } from 'lucide-vue-next'
+import { Users, Calendar, MapPin, Heart, X, Check, Clock, Share2, Crown, Play } from 'lucide-vue-next'
 
 const props = defineProps({
     organizerName: {
@@ -15,6 +15,40 @@ const emit = defineEmits(['close'])
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
+
+// YouTube ID extractor
+const getYouTubeId = (url) => {
+    if (!url) return null
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+        /^([a-zA-Z0-9_-]{11})$/
+    ]
+    for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match) return match[1]
+    }
+    return null
+}
+
+// TikTok ID extractor
+const getTikTokId = (url) => {
+    if (!url) return null
+    const patterns = [
+        /tiktok\.com\/@[^/]+\/video\/(\d+)/,
+        /vm\.tiktok\.com\/([a-zA-Z0-9]+)/,
+        /tiktok\.com\/t\/([a-zA-Z0-9]+)/
+    ]
+    for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match) return match[1]
+    }
+    return null
+}
+
+// Check if event has video
+const hasVideo = (event) => {
+    return event.mediaType && event.mediaType !== 'image' && event.videoUrl
+}
 
 // Filter events for this organizer
 const organizerEvents = computed(() => {
@@ -114,6 +148,13 @@ const formatDate = (dateStr) => {
                 >
                     <img :src="event.image" class="w-full h-full object-cover transition-all duration-300 group-hover:scale-110 group-hover:brightness-75" />
                     
+                    <!-- Video Type Badge -->
+                    <div v-if="hasVideo(event)" class="absolute top-2 left-2">
+                        <div class="bg-black/60 p-1.5 rounded-full shadow-lg backdrop-blur-sm">
+                            <Play class="w-3 h-3 text-white" />
+                        </div>
+                    </div>
+                    
                     <!-- Premium Badge -->
                     <div v-if="event.isPremium" class="absolute top-2 right-2">
                         <div class="bg-gradient-to-r from-yellow-400 to-amber-500 p-1.5 rounded-full shadow-lg">
@@ -140,7 +181,24 @@ const formatDate = (dateStr) => {
                 <div class="bg-white dark:bg-gray-900 w-full max-h-[85vh] rounded-t-3xl overflow-y-auto pointer-events-auto relative">
                      <!-- Cover -->
                     <div class="relative h-64">
-                        <img :src="selectedEvent.image" class="w-full h-full object-cover">
+                        <!-- YouTube Video -->
+                        <iframe
+                          v-if="(selectedEvent.mediaType === 'youtube' || selectedEvent.mediaType === 'youtube_short') && selectedEvent.videoUrl && getYouTubeId(selectedEvent.videoUrl)"
+                          :src="`https://www.youtube.com/embed/${getYouTubeId(selectedEvent.videoUrl)}?autoplay=1&mute=1&rel=0&playsinline=1`"
+                          class="w-full h-full border-0"
+                          frameborder="0"
+                          allow="autoplay; encrypted-media"
+                        ></iframe>
+                        <!-- TikTok Video -->
+                        <iframe
+                          v-else-if="selectedEvent.mediaType === 'tiktok' && selectedEvent.videoUrl && getTikTokId(selectedEvent.videoUrl)"
+                          :src="`https://www.tiktok.com/embed/v2/${getTikTokId(selectedEvent.videoUrl)}?lang=fr`"
+                          class="w-full h-full border-0"
+                          frameborder="0"
+                          allow="autoplay; encrypted-media"
+                        ></iframe>
+                        <!-- Image fallback -->
+                        <img v-else :src="selectedEvent.image" class="w-full h-full object-cover">
                         
                         <!-- Premium Badge on Image -->
                         <div v-if="selectedEvent.isPremium" class="absolute top-4 left-4">
