@@ -4,10 +4,11 @@ import { useRouter } from 'vue-router'
 import { useAdminStore } from '../stores/adminStore'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
-import { 
-    LogOut, Plus, Edit, Trash2, Calendar, MapPin, 
+import {
+    LogOut, Plus, Edit, Trash2, Calendar, MapPin,
     X, Check, Camera, Save, ArrowLeft, Mic, MicOff, Volume2,
-    Search, Loader2, Navigation, Tag, Store, Megaphone 
+    Search, Loader2, Navigation, Tag, Store, Megaphone,
+    Video, SwitchCamera, Locate, CameraOff
 } from 'lucide-vue-next'
 import L from 'leaflet'
 
@@ -22,8 +23,10 @@ const isOrganizerMode = computed(() => !adminStore.isAuthenticated && userStore.
 // Charger les événements et demander les permissions au montage
 onMounted(async () => {
     await eventStore.loadEvents()
-    // Demander la permission microphone pour la dictée vocale
+    // Demander les permissions au montage
     requestMicPermission()
+    requestCameraPermission()
+    requestGeoPermission()
     // Charger le CSS Leaflet pour le map picker
     if (!document.querySelector('link[href*="leaflet"]')) {
         const link = document.createElement('link')
@@ -73,6 +76,178 @@ const requestMicPermission = async () => {
             micPermission.value = 'denied'
         }
     }
+}
+
+// ============================
+// Permission Caméra & Capture Photo
+// ============================
+const cameraPermission = ref('prompt')
+const showCameraCapture = ref(false)
+const cameraVideoRef = ref(null)
+const cameraStream = ref(null)
+const cameraFacingMode = ref('environment') // 'environment' (arrière) ou 'user' (selfie)
+
+const requestCameraPermission = async () => {
+    try {
+        if (navigator.permissions) {
+            try {
+                const permStatus = await navigator.permissions.query({ name: 'camera' })
+                cameraPermission.value = permStatus.state
+                permStatus.onchange = () => {
+                    cameraPermission.value = permStatus.state
+                }
+            } catch (e) { /* Permissions API peut ne pas supporter 'camera' */ }
+        }
+    } catch (err) {
+        console.warn('Permission caméra non vérifiable:', err.message)
+    }
+}
+
+/**
+ * Ouvrir la caméra pour capturer une photo
+ * Utilise getUserMedia pour accéder au flux vidéo
+ */
+const openCameraCapture = async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: cameraFacingMode.value,
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            }
+        })
+        cameraStream.value = stream
+        cameraPermission.value = 'granted'
+        showCameraCapture.value = true
+        await nextTick()
+        if (cameraVideoRef.value) {
+            cameraVideoRef.value.srcObject = stream
+            cameraVideoRef.value.play()
+        }
+    } catch (err) {
+        console.error('Erreur accès caméra:', err)
+        if (err.name === 'NotAllowedError') {
+            cameraPermission.value = 'denied'
+        } else if (err.name === 'NotFoundError') {
+            dictationError.value = '⚠️ Aucune caméra détectée sur cet appareil.'
+            setTimeout(() => dictationError.value = '', 4000)
+        }
+    }
+}
+
+/**
+ * Basculer entre caméra avant (selfie) et arrière
+ */
+const switchCamera = async () => {
+    cameraFacingMode.value = cameraFacingMode.value === 'environment' ? 'user' : 'environment'
+    closeCameraCapture()
+    await nextTick()
+    openCameraCapture()
+}
+
+/**
+ * Capturer la photo depuis le flux vidéo via Canvas
+ */
+const capturePhoto = () => {
+    if (!cameraVideoRef.value) return
+    const video = cameraVideoRef.value
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    // Miroir horizontal pour la caméra selfie
+    if (cameraFacingMode.value === 'user') {
+        ctx.translate(canvas.width, 0)
+        ctx.scale(-1, 1)
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+    form.value.preview = dataUrl
+    form.value.image = dataUrl
+    closeCameraCapture()
+}
+
+/**
+ * Fermer la caméra et libérer le flux
+ */
+const closeCameraCapture = () => {
+    if (cameraStream.value) {
+        cameraStream.value.getTracks().forEach(track => track.stop())
+        cameraStream.value = null
+    }
+    showCameraCapture.value = false
+}
+
+// ============================
+// Permission Géolocalisation & GPS
+// ============================
+const geoPermission = ref('prompt')
+const isLocatingGPS = ref(false)
+
+const requestGeoPermission = async () => {
+    try {
+        if (navigator.permissions) {
+            try {
+                const permStatus = await navigator.permissions.query({ name: 'geolocation' })
+                geoPermission.value = permStatus.state
+                permStatus.onchange = () => {
+                    geoPermission.value = permStatus.state
+                }
+            } catch (e) { /* Ignore */ }
+        }
+    } catch (err) {
+        console.warn('Permission géolocalisation non vérifiable:', err.message)
+    }
+}
+
+/**
+ * Utiliser le GPS de l'appareil pour obtenir la position actuelle
+ * + géocodage inverse via Nominatim pour remplir le nom du lieu
+ */
+const useMyGPSLocation = () => {
+    if (!navigator.geolocation) {
+        dictationError.value = '⚠️ Géolocalisation non supportée sur cet appareil.'
+        setTimeout(() => dictationError.value = '', 4000)
+        return
+    }
+    isLocatingGPS.value = true
+    navigator.geolocation.getCurrentPosition(
+        async (position) => {
+            form.value.coords.lat = parseFloat(position.coords.latitude.toFixed(6))
+            form.value.coords.lng = parseFloat(position.coords.longitude.toFixed(6))
+            geoPermission.value = 'granted'
+            // Géocodage inverse pour obtenir le nom de l'adresse
+            try {
+                const response = await fetch(
+                    `https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json&accept-language=fr`,
+                    { headers: { 'User-Agent': 'BabiVibes-PWA/1.0' } }
+                )
+                if (response.ok) {
+                    const data = await response.json()
+                    if (data.display_name) {
+                        form.value.location = data.display_name.split(',').slice(0, 3).join(',').trim()
+                    }
+                }
+            } catch (e) {
+                console.warn('Reverse geocode failed:', e)
+            }
+            isLocatingGPS.value = false
+        },
+        (error) => {
+            console.error('Erreur GPS:', error)
+            isLocatingGPS.value = false
+            if (error.code === error.PERMISSION_DENIED) {
+                geoPermission.value = 'denied'
+                dictationError.value = '📍 Accès à la localisation refusé. Autorisez la géolocalisation dans les paramètres du navigateur.'
+            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                dictationError.value = '📍 Position GPS indisponible.'
+            } else {
+                dictationError.value = '📍 Délai de géolocalisation dépassé.'
+            }
+            setTimeout(() => dictationError.value = '', 4000)
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
 }
 
 // State
@@ -573,6 +748,7 @@ const closeSuggestions = () => {
 onUnmounted(() => {
     if (searchTimeout) clearTimeout(searchTimeout)
     stopDictation()
+    closeCameraCapture()
     if (mapPickerInstance) {
         mapPickerInstance.remove()
         mapPickerInstance = null
@@ -743,10 +919,18 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
 
     <!-- Main Content -->
     <main class="max-w-6xl mx-auto p-4">
-      <!-- Microphone Permission Banner -->
-      <div v-if="micPermission === 'denied'" class="mb-4 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
+      <!-- Permission Banners -->
+      <div v-if="micPermission === 'denied'" class="mb-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
         <MicOff class="w-5 h-5 flex-shrink-0" />
-        <span>🎤 Accès au microphone refusé. Pour utiliser la dictée vocale, autorisez le micro dans les paramètres de votre navigateur puis rechargez la page.</span>
+        <span>🎤 Accès au microphone refusé. Autorisez le micro dans les paramètres du navigateur puis rechargez la page.</span>
+      </div>
+      <div v-if="cameraPermission === 'denied'" class="mb-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
+        <CameraOff class="w-5 h-5 flex-shrink-0" />
+        <span>📷 Accès à la caméra refusé. Autorisez la caméra dans les paramètres du navigateur puis rechargez la page.</span>
+      </div>
+      <div v-if="geoPermission === 'denied'" class="mb-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
+        <MapPin class="w-5 h-5 flex-shrink-0" />
+        <span>📍 Accès à la géolocalisation refusé. Autorisez la localisation dans les paramètres du navigateur puis rechargez la page.</span>
       </div>
 
       <!-- Stats & Actions -->
@@ -875,16 +1059,53 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             <!-- Image -->
             <div>
               <label class="block text-gray-400 text-sm mb-2">Image de l'événement</label>
-              <label class="block w-full h-40 bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl cursor-pointer hover:border-primary transition overflow-hidden">
-                <div v-if="form.preview" class="w-full h-full">
-                  <img :src="form.preview" class="w-full h-full object-cover" />
+              <!-- Preview si image sélectionnée -->
+              <div v-if="form.preview" class="relative w-full h-40 bg-gray-900 border-2 border-gray-700 rounded-xl overflow-hidden mb-2">
+                <img :src="form.preview" class="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  @click="form.preview = ''; form.image = ''"
+                  class="absolute top-2 right-2 bg-black/60 text-white p-1.5 rounded-full hover:bg-red-500/80 transition"
+                  title="Supprimer l'image"
+                >
+                  <X class="w-4 h-4" />
+                </button>
+              </div>
+              <!-- Boutons de sélection : Fichier + Caméra -->
+              <div v-if="!form.preview" class="w-full h-40 bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl overflow-hidden flex flex-col items-center justify-center gap-3">
+                <Camera class="w-8 h-8 text-gray-600" />
+                <div class="flex gap-3">
+                  <label class="bg-gray-800 text-gray-300 px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-700 hover:text-primary transition flex items-center gap-2 text-sm font-medium">
+                    <Plus class="w-4 h-4" />
+                    Choisir un fichier
+                    <input type="file" accept="image/*" @change="handleImageChange" class="hidden" />
+                  </label>
+                  <button
+                    type="button"
+                    @click="openCameraCapture"
+                    class="bg-gray-800 text-gray-300 px-4 py-2 rounded-lg hover:bg-gray-700 hover:text-primary transition flex items-center gap-2 text-sm font-medium"
+                  >
+                    <Video class="w-4 h-4" />
+                    Prendre une photo
+                  </button>
                 </div>
-                <div v-else class="w-full h-full flex flex-col items-center justify-center">
-                  <Camera class="w-8 h-8 text-gray-600 mb-2" />
-                  <span class="text-gray-500 text-sm">Cliquer pour ajouter une image</span>
-                </div>
-                <input type="file" accept="image/*" @change="handleImageChange" class="hidden" />
-              </label>
+              </div>
+              <!-- Boutons de remplacement si image déjà présente -->
+              <div v-if="form.preview" class="flex gap-2">
+                <label class="flex-1 bg-gray-800 text-gray-300 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-700 hover:text-primary transition flex items-center justify-center gap-2 text-sm">
+                  <Plus class="w-4 h-4" />
+                  Remplacer (fichier)
+                  <input type="file" accept="image/*" @change="handleImageChange" class="hidden" />
+                </label>
+                <button
+                  type="button"
+                  @click="openCameraCapture"
+                  class="flex-1 bg-gray-800 text-gray-300 px-3 py-2 rounded-lg hover:bg-gray-700 hover:text-primary transition flex items-center justify-center gap-2 text-sm"
+                >
+                  <Video class="w-4 h-4" />
+                  Remplacer (caméra)
+                </button>
+              </div>
             </div>
 
             <!-- Title -->

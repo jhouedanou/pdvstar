@@ -21,11 +21,6 @@ const organizerEvents = computed(() => {
     return eventStore.events.filter(e => e.organizer === props.organizerName)
 })
 
-// Mock stats
-const travelersCount = computed(() => {
-    return organizerEvents.value.reduce((acc, curr) => acc + (curr.participantCount || 0), 0) + 1200
-})
-
 const isFollowing = computed(() => {
     return userStore.user?.following?.includes(props.organizerName)
 })
@@ -87,11 +82,7 @@ const formatDate = (dateStr) => {
             <div class="flex items-center gap-8 mb-6">
                 <div class="text-center">
                     <span class="block font-bold text-xl text-black dark:text-white">{{ organizerEvents.length }}</span>
-                    <span class="text-xs text-gray-500 uppercase tracking-wider">Events</span>
-                </div>
-                <div class="text-center">
-                    <span class="block font-bold text-xl text-black dark:text-white">{{ (travelersCount / 1000).toFixed(1) }}k</span>
-                    <span class="text-xs text-gray-500 uppercase tracking-wider">Travelers</span>
+                    <span class="text-xs text-gray-500 uppercase tracking-wider">Événements</span>
                 </div>
             </div>
 
