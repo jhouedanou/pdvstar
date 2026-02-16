@@ -48,18 +48,21 @@ const enterApp = () => {
 const feedItems = computed(() => {
     const items = []
     const now = new Date()
-    // Filtrer les events à venir et trier du plus loin à venir au plus proche
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()) // début de journée
-    const upcomingEvents = [...eventStore.events]
-        .filter(e => {
-            if (!e.date) return false // exclure les events sans date
-            return new Date(e.date) >= today
-        })
+    // Séparer les events à venir et passés
+    const sortedEvents = [...eventStore.events]
+        .filter(e => !!e.date)
         .sort((a, b) => {
             const dateA = new Date(a.date || 0)
             const dateB = new Date(b.date || 0)
-            return dateB - dateA
+            const diffA = dateA - now
+            const diffB = dateB - now
+            // Events à venir d'abord (les plus proches en premier), puis passés (les plus récents en premier)
+            if (diffA >= 0 && diffB >= 0) return diffA - diffB  // à venir : plus proche d'abord
+            if (diffA < 0 && diffB < 0) return diffB - diffA     // passés : plus récent d'abord
+            if (diffA >= 0) return -1                             // à venir avant passé
+            return 1
         })
+    const upcomingEvents = sortedEvents
     const adsList = ads.value
 
     upcomingEvents.forEach((event, index) => {
@@ -1015,6 +1018,16 @@ const handleDeleteEvent = async (eventId) => {
 
           <div class="max-w-[85%]">
             <h2 class="text-2xl font-bold leading-tight mb-1 text-white text-shadow">{{ item.data.title }}</h2>
+            <!-- Date de l'événement -->
+            <div v-if="item.data.date" class="flex items-center gap-1.5 mb-1">
+              <Calendar class="w-4 h-4 text-primary" />
+              <span class="text-sm font-semibold" :class="new Date(item.data.date) >= new Date() ? 'text-primary' : 'text-gray-400'">
+                {{ new Date(item.data.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) }}
+                à {{ new Date(item.data.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) }}
+              </span>
+              <span v-if="new Date(item.data.date) < new Date()" class="bg-gray-500/40 text-gray-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">PASSÉ</span>
+              <span v-else-if="(new Date(item.data.date) - new Date()) < 86400000" class="bg-red-500/40 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse">AUJOURD'HUI</span>
+            </div>
             <div class="flex items-center text-gray-200 font-medium text-sm gap-2">
                 <span class="flex items-center text-primary"><MapPin class="w-4 h-4 mr-0.5"/> {{ item.data.location }}</span>
                 <span class="text-gray-400">•</span>
