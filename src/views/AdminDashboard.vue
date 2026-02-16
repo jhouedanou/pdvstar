@@ -9,8 +9,10 @@ import {
     X, Check, Camera, Save, ArrowLeft, Mic, MicOff, Volume2,
     Search, Loader2, Navigation, Tag, Store, Megaphone,
     Video, SwitchCamera, Locate, CameraOff, Image, Play, Link,
-    ShieldCheck, ShieldX, Clock, Filter, Eye, EyeOff
+    ShieldCheck, ShieldX, Clock, Filter, Eye, EyeOff,
+    AlertTriangle, Lock, Ticket, Gift, Ban
 } from 'lucide-vue-next'
+import { PASS_CATALOG } from '../services/supabase'
 import L from 'leaflet'
 
 const router = useRouter()
@@ -297,6 +299,139 @@ const confirmReject = async () => {
     rejectionReason.value = ''
 }
 
+// ============================
+// Quota Publications Gratuites (5 max)
+// ============================
+const FREE_PUBLICATION_LIMIT = 5
+
+// Nombre d'événements créés par cet utilisateur
+const myPublicationsCount = computed(() => {
+    if (!userStore.user) return 0
+    const u = userStore.user
+    // Compter les events créés par cet utilisateur
+    return eventStore.events.filter(e => {
+        if (e.createdBy && u.id && e.createdBy === u.id) return true
+        const orgName = (e.organizer || '').toLowerCase()
+        const names = [u.organizerName, u.spaceName, u.name].filter(Boolean).map(n => n.toLowerCase())
+        return names.some(n => orgName === n || orgName.includes(n))
+    }).length
+})
+
+const freePublicationsRemaining = computed(() => {
+    return Math.max(0, FREE_PUBLICATION_LIMIT - myPublicationsCount.value)
+})
+
+const hasReachedQuota = computed(() => {
+    // L'admin classique n'a pas de limite
+    if (!isOrganizerMode.value) return false
+    // Si l'utilisateur a un pass actif, pas de limite
+    if (userStore.hasActivePass) return false
+    return myPublicationsCount.value >= FREE_PUBLICATION_LIMIT
+})
+
+const showQuotaModal = ref(false)
+const showPassPurchaseFromAdmin = ref(false)
+
+// ============================
+// Portail Anti-Suppression Abusive
+// ============================
+const showDeletePortal = ref(false)
+const deletingEvent = ref(null)
+const deletePassword = ref('')
+const deleteConfirmText = ref('')
+const deleteError = ref('')
+const deleteStep = ref(1) // 1: confirmation, 2: mot de passe
+const deleteCooldown = ref(false)
+const deleteCooldownSeconds = ref(0)
+let deleteCooldownTimer = null
+
+// Historique des suppressions (localStorage)
+const getDeleteHistory = () => {
+    try {
+        return JSON.parse(localStorage.getItem('pdvstar_delete_history') || '[]')
+    } catch { return [] }
+}
+
+const addDeleteHistory = (eventTitle) => {
+    const history = getDeleteHistory()
+    history.unshift({ title: eventTitle, date: new Date().toISOString(), userId: userStore.user?.id })
+    // Garder les 50 dernières
+    localStorage.setItem('pdvstar_delete_history', JSON.stringify(history.slice(0, 50)))
+}
+
+// Vérifier le rate limit (max 3 suppressions par heure)
+const checkDeleteRateLimit = () => {
+    const history = getDeleteHistory()
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const recentDeletes = history.filter(h => h.date > oneHourAgo && h.userId === userStore.user?.id)
+    return recentDeletes.length < 3
+}
+
+const openDeletePortal = (event) => {
+    if (!checkDeleteRateLimit()) {
+        deleteError.value = 'Limite atteinte : maximum 3 suppressions par heure. Veuillez patienter.'
+        deletingEvent.value = event
+        showDeletePortal.value = true
+        deleteStep.value = 0 // step 0 = rate limit bloqué
+        return
+    }
+    deletingEvent.value = event
+    deletePassword.value = ''
+    deleteConfirmText.value = ''
+    deleteError.value = ''
+    deleteStep.value = 1
+    showDeletePortal.value = true
+}
+
+const proceedToDeleteStep2 = () => {
+    if (deleteConfirmText.value.trim().toUpperCase() !== 'SUPPRIMER') {
+        deleteError.value = 'Veuillez taper SUPPRIMER pour confirmer'
+        return
+    }
+    deleteError.value = ''
+    deleteStep.value = 2
+}
+
+const executeSecureDelete = async () => {
+    // Vérifier le mot de passe admin
+    const isAdmin = adminStore.isAuthenticated
+    const correctPassword = isAdmin ? 'admin' : (userStore.user?.phone || '')
+    
+    if (deletePassword.value !== correctPassword) {
+        deleteError.value = isAdmin ? 'Mot de passe admin incorrect' : 'Le mot de passe doit être votre numéro de téléphone'
+        return
+    }
+    
+    if (deletingEvent.value) {
+        addDeleteHistory(deletingEvent.value.title)
+        await eventStore.deleteEvent(deletingEvent.value.id)
+        
+        // Activer le cooldown de 10 secondes
+        deleteCooldown.value = true
+        deleteCooldownSeconds.value = 10
+        deleteCooldownTimer = setInterval(() => {
+            deleteCooldownSeconds.value--
+            if (deleteCooldownSeconds.value <= 0) {
+                deleteCooldown.value = false
+                clearInterval(deleteCooldownTimer)
+            }
+        }, 1000)
+    }
+    
+    showDeletePortal.value = false
+    deletingEvent.value = null
+    deletePassword.value = ''
+    deleteConfirmText.value = ''
+}
+
+const cancelDeletePortal = () => {
+    showDeletePortal.value = false
+    deletingEvent.value = null
+    deletePassword.value = ''
+    deleteConfirmText.value = ''
+    deleteError.value = ''
+}
+
 // Form data
 const defaultForm = () => ({
     title: '',
@@ -379,8 +514,13 @@ const handleImageChange = (e) => {
     }
 }
 
-// Open create modal
+// Open create modal (avec vérification quota)
 const openCreateModal = () => {
+    // Vérifier le quota de publications gratuites
+    if (hasReachedQuota.value) {
+        showQuotaModal.value = true
+        return
+    }
     form.value = defaultForm()
     // Auto-remplir l'organisateur si mode organisateur
     if (isOrganizerMode.value && userStore.user) {
@@ -470,17 +610,12 @@ const updateEvent = async () => {
     }
 }
 
-// Delete event
-const confirmDelete = (eventId) => {
-    deleteConfirmId.value = eventId
+// Delete event — utilise désormais le portail sécurisé
+const confirmDelete = (event) => {
+    openDeletePortal(event)
 }
 
 const cancelDelete = () => {
-    deleteConfirmId.value = null
-}
-
-const deleteEvent = (eventId) => {
-    eventStore.deleteEvent(eventId)
     deleteConfirmId.value = null
 }
 
@@ -1024,6 +1159,37 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
         <span>📍 Accès à la géolocalisation refusé. Autorisez la localisation dans les paramètres du navigateur puis rechargez la page.</span>
       </div>
 
+      <!-- Bandeau Quota Publications -->
+      <div v-if="isOrganizerMode" class="mb-4 rounded-xl p-3 flex items-center justify-between gap-3"
+        :class="hasReachedQuota 
+          ? 'bg-red-500/20 border border-red-500/30' 
+          : freePublicationsRemaining <= 2 
+            ? 'bg-yellow-500/20 border border-yellow-500/30' 
+            : 'bg-green-500/20 border border-green-500/30'">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-lg" :class="hasReachedQuota ? 'bg-red-500/30' : 'bg-green-500/30'">
+            <Gift v-if="!hasReachedQuota" class="w-5 h-5 text-green-400" />
+            <Ban v-else class="w-5 h-5 text-red-400" />
+          </div>
+          <div>
+            <p class="text-sm font-bold" :class="hasReachedQuota ? 'text-red-400' : freePublicationsRemaining <= 2 ? 'text-yellow-400' : 'text-green-400'">
+              <span v-if="userStore.hasActivePass">♾️ Publications illimitées (Pass actif)</span>
+              <span v-else-if="hasReachedQuota">Quota atteint — {{ myPublicationsCount }}/{{ FREE_PUBLICATION_LIMIT }}</span>
+              <span v-else>{{ freePublicationsRemaining }} publication(s) gratuite(s) restante(s)</span>
+            </p>
+            <p class="text-xs text-gray-400">
+              <span v-if="userStore.hasActivePass">Votre pass vous donne un accès illimité.</span>
+              <span v-else-if="hasReachedQuota">Achetez un pass pour publier davantage d'événements.</span>
+              <span v-else>{{ myPublicationsCount }} / {{ FREE_PUBLICATION_LIMIT }} publications gratuites utilisées</span>
+            </p>
+          </div>
+        </div>
+        <button v-if="hasReachedQuota" @click="showQuotaModal = true"
+          class="bg-primary text-black font-bold px-3 py-2 rounded-xl text-xs whitespace-nowrap flex items-center gap-1 hover:bg-primary/90 transition">
+          <Ticket class="w-4 h-4" /> Obtenir un Pass
+        </button>
+      </div>
+
       <!-- Stats & Actions -->
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
         <div>
@@ -1147,26 +1313,13 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                 Modifier
               </button>
               <button 
-                v-if="deleteConfirmId !== event.id"
-                @click="confirmDelete(event.id)"
-                class="bg-red-500/20 text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/30 transition"
+                @click="confirmDelete(event)"
+                :disabled="deleteCooldown"
+                class="bg-red-500/20 text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/30 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                :title="deleteCooldown ? `Patientez ${deleteCooldownSeconds}s` : 'Supprimer'"
               >
                 <Trash2 class="w-4 h-4" />
               </button>
-              <div v-else class="flex gap-1">
-                <button 
-                  @click="deleteEvent(event.id)"
-                  class="bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition"
-                >
-                  <Check class="w-4 h-4" />
-                </button>
-                <button 
-                  @click="cancelDelete"
-                  class="bg-gray-700 text-white px-3 py-2 rounded-lg hover:bg-gray-600 transition"
-                >
-                  <X class="w-4 h-4" />
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1227,6 +1380,160 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
     </Teleport>
 
     <!-- Create/Edit Modal -->
+    <Teleport to="body">
+    <!-- Modale Quota Atteint -->
+      <div
+        v-if="showQuotaModal"
+        class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+        @click.self="showQuotaModal = false"
+      >
+        <div class="bg-surface rounded-2xl w-full max-w-md p-6 text-center">
+          <div class="bg-red-500/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Ban class="w-8 h-8 text-red-400" />
+          </div>
+          <h3 class="text-xl font-bold text-white mb-2">Quota de publications atteint</h3>
+          <p class="text-gray-400 text-sm mb-2">
+            Vous avez utilisé vos <strong class="text-white">{{ FREE_PUBLICATION_LIMIT }} publications gratuites</strong>.
+          </p>
+          <p class="text-gray-400 text-sm mb-6">
+            Pour continuer à publier des événements, procurez-vous un Pass d'accès.
+          </p>
+
+          <!-- Passes rapides -->
+          <div class="space-y-2 mb-6">
+            <div v-for="pass in Object.values(PASS_CATALOG)" :key="pass.id"
+              class="flex items-center justify-between p-3 bg-gray-800 rounded-xl border border-gray-700">
+              <div class="flex items-center gap-2">
+                <span class="text-xl">{{ pass.emoji }}</span>
+                <div class="text-left">
+                  <p class="text-white font-bold text-sm">{{ pass.name }}</p>
+                  <p class="text-gray-400 text-[10px]">{{ pass.description }}</p>
+                </div>
+              </div>
+              <span class="text-white font-black text-sm whitespace-nowrap">{{ pass.price.toLocaleString() }} CFA</span>
+            </div>
+          </div>
+
+          <div class="flex gap-3">
+            <button @click="showQuotaModal = false"
+              class="flex-1 bg-gray-800 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-700 transition">
+              Fermer
+            </button>
+            <button @click="showQuotaModal = false; router.push('/')"
+              class="flex-1 bg-primary text-black py-2.5 rounded-xl font-bold hover:bg-primary/90 transition flex items-center justify-center gap-1">
+              <Ticket class="w-4 h-4" /> Acheter un Pass
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Portail Anti-Suppression Abusive -->
+    <Teleport to="body">
+      <div
+        v-if="showDeletePortal"
+        class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+      >
+        <div class="bg-surface rounded-2xl w-full max-w-md p-6">
+          <!-- Rate Limit Bloqué -->
+          <div v-if="deleteStep === 0" class="text-center">
+            <div class="bg-red-500/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle class="w-8 h-8 text-red-400" />
+            </div>
+            <h3 class="text-xl font-bold text-red-400 mb-2">Limite de suppression atteinte</h3>
+            <p class="text-gray-400 text-sm mb-6">
+              Vous avez effectué trop de suppressions récemment. Maximum 3 suppressions par heure pour prévenir les abus.
+            </p>
+            <button @click="cancelDeletePortal"
+              class="w-full bg-gray-800 text-white py-2.5 rounded-xl font-bold hover:bg-gray-700 transition">
+              Compris
+            </button>
+          </div>
+
+          <!-- Step 1 : Double confirmation -->
+          <div v-else-if="deleteStep === 1">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="bg-red-500/20 p-3 rounded-xl">
+                <AlertTriangle class="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 class="text-lg font-bold text-white">Supprimer cet événement ?</h3>
+                <p class="text-gray-400 text-xs">Cette action est irréversible.</p>
+              </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-3 mb-4">
+              <p class="text-white font-bold text-sm truncate">{{ deletingEvent?.title }}</p>
+              <p class="text-gray-400 text-xs">{{ deletingEvent?.location }} — {{ deletingEvent?.date ? new Date(deletingEvent.date).toLocaleDateString('fr-FR') : '' }}</p>
+            </div>
+
+            <p class="text-gray-300 text-sm mb-3">
+              Pour confirmer, tapez <strong class="text-red-400">SUPPRIMER</strong> ci-dessous :
+            </p>
+            <input
+              v-model="deleteConfirmText"
+              type="text"
+              placeholder="Tapez SUPPRIMER"
+              class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white text-center font-bold tracking-widest uppercase focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none"
+              @keyup.enter="proceedToDeleteStep2"
+            />
+            <p v-if="deleteError" class="text-red-400 text-xs mt-2 text-center">{{ deleteError }}</p>
+
+            <div class="flex gap-3 mt-4">
+              <button @click="cancelDeletePortal"
+                class="flex-1 bg-gray-800 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-700 transition">
+                Annuler
+              </button>
+              <button @click="proceedToDeleteStep2"
+                :disabled="deleteConfirmText.trim().toUpperCase() !== 'SUPPRIMER'"
+                class="flex-1 bg-red-500/20 text-red-400 py-2.5 rounded-xl font-bold hover:bg-red-500/30 transition disabled:opacity-30 disabled:cursor-not-allowed">
+                Continuer →
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 2 : Mot de passe -->
+          <div v-else-if="deleteStep === 2">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="bg-red-500/20 p-3 rounded-xl">
+                <Lock class="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 class="text-lg font-bold text-white">Vérification d'identité</h3>
+                <p class="text-gray-400 text-xs">Dernière étape de sécurité</p>
+              </div>
+            </div>
+
+            <p class="text-gray-300 text-sm mb-3">
+              {{ adminStore.isAuthenticated 
+                ? 'Entrez le mot de passe administrateur :' 
+                : 'Entrez votre numéro de téléphone pour confirmer :' }}
+            </p>
+            <input
+              v-model="deletePassword"
+              :type="adminStore.isAuthenticated ? 'password' : 'tel'"
+              :placeholder="adminStore.isAuthenticated ? 'Mot de passe admin' : 'Votre numéro de téléphone'"
+              class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none"
+              @keyup.enter="executeSecureDelete"
+            />
+            <p v-if="deleteError" class="text-red-400 text-xs mt-2 text-center">{{ deleteError }}</p>
+
+            <div class="flex gap-3 mt-4">
+              <button @click="deleteStep = 1; deleteError = ''"
+                class="flex-1 bg-gray-800 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-700 transition">
+                ← Retour
+              </button>
+              <button @click="executeSecureDelete"
+                :disabled="!deletePassword.trim()"
+                class="flex-1 bg-red-600 text-white py-2.5 rounded-xl font-bold hover:bg-red-700 transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1">
+                <Trash2 class="w-4 h-4" /> Supprimer définitivement
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <Teleport to="body">
       <div 
         v-if="showCreateModal || showEditModal" 
