@@ -3,14 +3,18 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@vueuse/core'
 import { useEventStore } from '../stores/eventStore'
+import { useUserStore } from '../stores/userStore'
+import { processImage } from '../utils/imageUpload'
 import { Camera, Mic, MapPin, Check, ArrowRight, Loader2, Calendar, FileText, Type } from 'lucide-vue-next'
 
 const router = useRouter()
 const store = useEventStore()
+const userStore = useUserStore()
 const { coords, resume } = useGeolocation()
 
 // State
 const step = ref(1)
+const imageError = ref('')
 const steps = [
     { title: "Photo", icon: Camera },
     { title: "Titre", icon: Type },
@@ -30,18 +34,19 @@ const form = ref({
 const isRecording = ref(false)
 const isTranscribing = ref(false)
 
-// Step 1: Media
-const handleFileChange = (e) => {
+// Step 1: Media (avec validation securisee)
+const handleFileChange = async (e) => {
   const file = e.target.files[0]
-  if (file) {
-    form.value.image = file
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-        form.value.preview = ev.target.result
-        nextStep()
-    }
-    reader.readAsDataURL(file)
+  if (!file) return
+  imageError.value = ''
+  const result = await processImage(file)
+  if (!result.success) {
+    imageError.value = result.error
+    return
   }
+  form.value.image = file
+  form.value.preview = result.data
+  nextStep()
 }
 
 // Voice Logic (Generic)
@@ -99,7 +104,9 @@ const publishEvent = () => {
             lat: coords.value.latitude !== Infinity ? coords.value.latitude : 5.30966,
             lng: coords.value.longitude !== Infinity ? coords.value.longitude : -3.97449
         },
-        distance: '0 km'
+        distance: '0 km',
+        createdBy: userStore.user?.id || null,
+        status: userStore.isOrganizer ? 'pending' : 'approved'
     })
     router.push('/')
 }
@@ -138,6 +145,7 @@ onMounted(() => {
                 </div>
                 <input type="file" accept="image/*" @change="handleFileChange" class="hidden" />
             </label>
+            <p v-if="imageError" class="text-red-500 text-sm text-center mt-2 font-medium">{{ imageError }}</p>
         </div>
 
         <!-- Step 2: Title -->

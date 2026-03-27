@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAdminStore } from '../stores/adminStore'
 import { useUserStore } from '../stores/userStore'
+import { processImage } from '../utils/imageUpload'
 import { 
     ArrowLeft, Plus, Edit, Trash2, X, Check, Camera, Save, 
     ExternalLink, Eye, MousePointerClick, ToggleLeft, ToggleRight,
@@ -23,6 +24,7 @@ const isLoading = ref(false)
 const showModal = ref(false)
 const editingAd = ref(null)
 const deleteConfirmId = ref(null)
+const imageError = ref('')
 
 // Ads filtrées : admin voit tout, organisateur voit ses pubs
 const ads = computed(() => {
@@ -67,16 +69,17 @@ const loadAds = async () => {
     }
 }
 
-const handleImageChange = (e) => {
+const handleImageChange = async (e) => {
     const file = e.target.files[0]
-    if (file) {
-        const reader = new FileReader()
-        reader.onload = (ev) => {
-            form.value.preview = ev.target.result
-            form.value.image = ev.target.result
-        }
-        reader.readAsDataURL(file)
+    if (!file) return
+    imageError.value = ''
+    const result = await processImage(file)
+    if (!result.success) {
+        imageError.value = result.error
+        return
     }
+    form.value.preview = result.data
+    form.value.image = result.data
 }
 
 const openCreateModal = () => {
@@ -343,6 +346,7 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
                 </div>
                 <input type="file" accept="image/*" @change="handleImageChange" class="hidden" />
               </label>
+              <p v-if="imageError" class="text-red-500 text-sm mt-2 font-medium">{{ imageError }}</p>
               <!-- Ou URL -->
               <input 
                 v-model="form.image" 

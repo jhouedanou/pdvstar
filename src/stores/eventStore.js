@@ -27,9 +27,36 @@ export const useEventStore = defineStore('events', () => {
             
             if (supaEvents.length > 0) {
                 events.value = supaEvents
+
+                // Vérifier si TOUS les events seed sont périmés (dates passées)
+                // Si oui, re-seeder avec des dates fraîches (uniquement les events sans created_by)
+                const now = new Date()
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+                const seedEvents = supaEvents.filter(e => !e.createdBy)
+                const hasFutureSeeds = seedEvents.some(e => e.date && new Date(e.date) >= today)
+                
+                if (seedEvents.length > 0 && !hasFutureSeeds) {
+                    console.log('🔄 Events seed périmés, re-seed avec dates fraîches...')
+                    // Supprimer les anciens seeds et insérer de nouveaux
+                    for (const e of seedEvents) {
+                        await supaDeleteEvent(e.id)
+                    }
+                    const localEvents = db.getEvents()
+                    // Forcer la régénération des dates
+                    db.seedEvents()
+                    const freshLocalEvents = db.getEvents()
+                    const seeded = await supaSeedEvents(freshLocalEvents)
+                    if (seeded.length > 0) {
+                        // Garder les events créés par les utilisateurs + les nouveaux seeds
+                        const userEvents = supaEvents.filter(e => e.createdBy)
+                        events.value = [...userEvents, ...seeded]
+                        console.log(`✅ ${seeded.length} events re-seedés avec dates fraîches`)
+                    }
+                }
             } else {
                 // Table vide → seed avec les données locales
                 console.log('📦 Table Supabase vide, insertion des données seed...')
+                db.seedEvents() // Forcer la régénération
                 const localEvents = db.getEvents()
                 const seeded = await supaSeedEvents(localEvents)
                 if (seeded.length > 0) {
@@ -43,6 +70,7 @@ export const useEventStore = defineStore('events', () => {
             }
         } catch (error) {
             console.error('❌ Erreur chargement Supabase, fallback local:', error)
+            db.seedEvents() // Régénérer avec dates fraîches
             events.value = db.getEvents()
         } finally {
             isLoading.value = false

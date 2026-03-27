@@ -9,6 +9,8 @@ import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import OrganizerProfile from '../components/OrganizerProfile.vue'
 import AdBanner from '../components/AdBanner.vue'
+import ConnectionBanner from '../components/ConnectionBanner.vue'
+import { useConnectionStatus } from '../composables/useConnectionStatus'
 import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
 import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
@@ -19,6 +21,7 @@ const eventStore = useEventStore()
 const userStore = useUserStore()
 const adminStore = useAdminStore()
 const router = useRouter()
+const { isOnline, isSyncing, showOfflineBanner, showReconnectBanner } = useConnectionStatus()
 
 const showProfileModal = ref(false)
 const sendingMessage = ref(false)
@@ -111,22 +114,35 @@ const feedItems = computed(() => {
     const items = []
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    // Filtrer uniquement les events à venir (aujourd'hui inclus), approuvés
-    const upcomingEvents = [...eventStore.events]
+
+    // Filtrer les events approuvés
+    const approvedEvents = [...eventStore.events]
         .filter(e => {
             if (!e.date) return false
             if (e.status && e.status !== 'approved') return false
-            return new Date(e.date) >= today
+            return true
         })
-        // Tri par score de pertinence (décroissant) puis par date (croissant) en cas d'égalité
+
+    // Séparer : events à venir vs passés
+    const upcomingEvents = approvedEvents.filter(e => new Date(e.date) >= today)
+    const pastEvents = approvedEvents.filter(e => new Date(e.date) < today)
+
+    // Utiliser les events à venir ; si aucun, fallback sur les plus récents (max 20)
+    let displayEvents = upcomingEvents.length > 0
+        ? upcomingEvents
+        : pastEvents.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20)
+
+    // Tri par score de pertinence (décroissant) puis par date (croissant)
+    displayEvents = displayEvents
         .map(e => ({ ...e, _score: computeRelevanceScore(e) }))
         .sort((a, b) => {
             if (b._score !== a._score) return b._score - a._score
             return new Date(a.date) - new Date(b.date)
         })
+
     const adsList = ads.value
 
-    upcomingEvents.forEach((event, index) => {
+    displayEvents.forEach((event, index) => {
         items.push({ type: 'event', data: event })
 
         // Insert ad every 5 events (sauf si utilisateur Premium — pas de pubs)
@@ -675,9 +691,16 @@ const filteredEvents = computed(() => {
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     
-    let results = eventStore.events
-        .filter(e => !!e.date && new Date(e.date) >= today)
+    // Events approuvés
+    const approved = eventStore.events
+        .filter(e => !!e.date)
         .filter(e => !e.status || e.status === 'approved') // modération
+    
+    // Prioriser les events à venir ; sinon fallback sur les récents
+    const upcoming = approved.filter(e => new Date(e.date) >= today)
+    let results = upcoming.length > 0
+        ? upcoming
+        : approved.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20)
     
     // Filtre premium
     if (showPremiumOnly.value) {
@@ -1067,6 +1090,9 @@ const handleDeleteEvent = async (eventId) => {
 
 <template>
   <div class="responsive-container bg-black text-white relative overflow-hidden">
+
+    <!-- Bandeau de connexion -->
+    <ConnectionBanner :showOfflineBanner="showOfflineBanner" :showReconnectBanner="showReconnectBanner" :isSyncing="isSyncing" />
 
     <!-- SPLASH SCREEN — débloque l'autoplay audio navigateur -->
     <Transition name="splash">

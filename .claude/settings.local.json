@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\socialmedia\\\\Documents\\\\GitHub\\\\pdvstar\\\\src\\\\utils\"\" 2>nul || echo \"Directory does not exist \")"
+    ]
+  }
+}

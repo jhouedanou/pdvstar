@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import { useAdminStore } from '../stores/adminStore'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
+import { processImage } from '../utils/imageUpload'
+import { useConnectionStatus } from '../composables/useConnectionStatus'
+import ConnectionBanner from '../components/ConnectionBanner.vue'
 import {
     LogOut, Plus, Edit, Trash2, Calendar, MapPin,
     X, Check, Camera, Save, ArrowLeft, Mic, MicOff, Volume2,
@@ -19,6 +22,8 @@ const router = useRouter()
 const adminStore = useAdminStore()
 const eventStore = useEventStore()
 const userStore = useUserStore()
+const { isOnline, isSyncing, showOfflineBanner, showReconnectBanner } = useConnectionStatus()
+const imageError = ref('')
 
 // Détection du mode : admin classique ou organisateur
 const isOrganizerMode = computed(() => !adminStore.isAuthenticated && userStore.isOrganizer)
@@ -501,17 +506,18 @@ const handleLogout = () => {
     }
 }
 
-// Handle image selection
-const handleImageChange = (e) => {
+// Handle image selection (avec validation securisee)
+const handleImageChange = async (e) => {
     const file = e.target.files[0]
-    if (file) {
-        const reader = new FileReader()
-        reader.onload = (ev) => {
-            form.value.preview = ev.target.result
-            form.value.image = ev.target.result
-        }
-        reader.readAsDataURL(file)
+    if (!file) return
+    imageError.value = ''
+    const result = await processImage(file)
+    if (!result.success) {
+        imageError.value = result.error
+        return
     }
+    form.value.preview = result.data
+    form.value.image = result.data
 }
 
 // Open create modal (avec vérification quota)
@@ -1120,6 +1126,8 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
 
 <template>
   <div class="min-h-screen bg-black">
+    <!-- Bandeau de connexion -->
+    <ConnectionBanner :showOfflineBanner="showOfflineBanner" :showReconnectBanner="showReconnectBanner" :isSyncing="isSyncing" />
     <!-- Header -->
     <header class="bg-surface border-b border-gray-800 px-4 py-3 sticky top-0 z-40">
       <div class="max-w-6xl mx-auto flex justify-between items-center">
@@ -1691,6 +1699,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                   Remplacer (caméra)
                 </button>
               </div>
+              <p v-if="imageError" class="text-red-500 text-sm mt-2 font-medium">{{ imageError }}</p>
             </div>
 
             <!-- Image de couverture (pour vidéos — optionnelle) -->

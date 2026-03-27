@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '../stores/userStore'
+import { processImage } from '../utils/imageUpload'
 import { Phone, User, MapPin, Camera, Loader2 } from 'lucide-vue-next'
 
 const userStore = useUserStore()
@@ -18,6 +19,7 @@ const formData = ref({
 const isLoading = ref(false)
 const isLocating = ref(false) // State for geolocation loading
 const error = ref('')
+const imageError = ref('')
 
 onMounted(async () => {
     // 1. Check persistence first (User preference)
@@ -48,16 +50,17 @@ onMounted(async () => {
     }
 })
 
-const handlePhotoChange = (e) => {
+const handlePhotoChange = async (e) => {
     const file = e.target.files[0]
-    if (file) {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-            formData.value.photoPreview = e.target.result
-        }
-        reader.readAsDataURL(file)
-        formData.value.photo = file
+    if (!file) return
+    imageError.value = ''
+    const result = await processImage(file, { maxWidth: 400, maxHeight: 400 })
+    if (!result.success) {
+        imageError.value = result.error
+        return
     }
+    formData.value.photoPreview = result.data
+    formData.value.photo = file
 }
 
 const handleSubmit = async () => {
@@ -125,6 +128,7 @@ const handleSubmit = async () => {
                     <Camera class="w-6 h-6 text-white" />
                 </div>
             </label>
+            <p v-if="imageError" class="text-red-500 text-xs text-center mt-1 font-medium">{{ imageError }}</p>
         </div>
 
         <!-- Username Field -->
