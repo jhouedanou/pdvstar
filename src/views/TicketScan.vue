@@ -1,14 +1,14 @@
 <script setup>
-import { ref, shallowRef, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/userStore'
 import { redeemTicket } from '../services/ticketService'
 import { ArrowLeft, ScanLine, CheckCircle2, XCircle, RotateCcw } from 'lucide-vue-next'
+import { QrcodeStream } from 'vue-qrcode-reader'
 
 const router = useRouter()
 const userStore = useUserStore()
 
-const QrStream = shallowRef(null)
 const cameraReady = ref(false)
 const lastResult = ref(null)
 const error = ref('')
@@ -16,12 +16,11 @@ const scanning = ref(true)
 
 onMounted(async () => {
     try {
-        const modName = 'vue-qrcode-reader'
-        const mod = await import(/* @vite-ignore */ modName)
-        QrStream.value = mod.QrcodeStream
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        stream.getTracks().forEach(t => t.stop())
         cameraReady.value = true
     } catch (e) {
-        error.value = 'Module scanner indisponible. yarn add vue-qrcode-reader'
+        error.value = `Caméra inaccessible : ${e.message}`
     }
 })
 
@@ -58,7 +57,7 @@ const reset = () => {
 
       <!-- Scanner -->
       <div v-if="!lastResult && cameraReady" class="w-full max-w-sm aspect-square bg-gray-900 rounded-2xl overflow-hidden border-2 border-primary/50">
-        <component :is="QrStream" @detect="onDetect" class="w-full h-full" />
+        <QrcodeStream @detect="onDetect" class="w-full h-full" />
       </div>
 
       <!-- Success -->

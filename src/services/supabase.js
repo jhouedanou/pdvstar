@@ -189,7 +189,7 @@ export async function fetchEvents() {
         .order('created_at', { ascending: false })
 
     if (error) {
-        console.error('❌ Erreur fetchEvents:', error.message)
+        console.error(' Erreur fetchEvents:', error.message)
         return []
     }
 
@@ -222,7 +222,7 @@ export async function createEvent(eventData) {
     }
 
     if (error) {
-        console.error('❌ Erreur createEvent:', error.message)
+        console.error(' Erreur createEvent:', error.message)
         return null
     }
 
@@ -257,7 +257,7 @@ export async function updateEvent(id, updates) {
     }
 
     if (error) {
-        console.error('❌ Erreur updateEvent:', error.message)
+        console.error(' Erreur updateEvent:', error.message)
         return null
     }
 
@@ -274,7 +274,7 @@ export async function deleteEvent(id) {
         .eq('id', id)
 
     if (error) {
-        console.error('❌ Erreur deleteEvent:', error.message)
+        console.error(' Erreur deleteEvent:', error.message)
         return false
     }
 
@@ -303,7 +303,7 @@ export async function seedEvents(eventsArray) {
     }
 
     if (error) {
-        console.error('❌ Erreur seedEvents:', error.message)
+        console.error(' Erreur seedEvents:', error.message)
         return []
     }
 
@@ -406,7 +406,7 @@ export async function purchasePass(userId, passType, paymentMethod, paymentRef) 
             .single()
 
         if (error) {
-            console.error('❌ Erreur purchasePass:', error.message)
+            console.error(' Erreur purchasePass:', error.message)
             // Fallback: stocker localement
             return {
                 id: 'local_' + Date.now(),
@@ -421,7 +421,7 @@ export async function purchasePass(userId, passType, paymentMethod, paymentRef) 
         }
         return fromSupabasePass(data)
     } catch (err) {
-        console.error('❌ Erreur réseau purchasePass:', err)
+        console.error(' Erreur réseau purchasePass:', err)
         return {
             id: 'local_' + Date.now(),
             userId,
@@ -451,12 +451,12 @@ export async function getActivePass(userId) {
             .maybeSingle()
 
         if (error) {
-            console.error('❌ Erreur getActivePass:', error.message)
+            console.error(' Erreur getActivePass:', error.message)
             return null
         }
         return data ? fromSupabasePass(data) : null
     } catch (err) {
-        console.error('❌ Erreur réseau getActivePass:', err)
+        console.error(' Erreur réseau getActivePass:', err)
         return null
     }
 }
@@ -473,12 +473,12 @@ export async function getUserPasses(userId) {
             .order('purchased_at', { ascending: false })
 
         if (error) {
-            console.error('❌ Erreur getUserPasses:', error.message)
+            console.error(' Erreur getUserPasses:', error.message)
             return []
         }
         return data.map(fromSupabasePass)
     } catch (err) {
-        console.error('❌ Erreur réseau getUserPasses:', err)
+        console.error(' Erreur réseau getUserPasses:', err)
         return []
     }
 }
@@ -494,12 +494,12 @@ export async function fetchAllPasses() {
             .order('purchased_at', { ascending: false })
 
         if (error) {
-            console.error('❌ Erreur fetchAllPasses:', error.message)
+            console.error(' Erreur fetchAllPasses:', error.message)
             return []
         }
         return data.map(fromSupabasePass)
     } catch (err) {
-        console.error('❌ Erreur réseau fetchAllPasses:', err)
+        console.error(' Erreur réseau fetchAllPasses:', err)
         return []
     }
 }
@@ -614,7 +614,7 @@ export async function findUserByPhone(phone) {
         .maybeSingle()
 
     if (error) {
-        console.error('❌ Erreur findUserByPhone:', error.message)
+        console.error(' Erreur findUserByPhone:', error.message)
         return null
     }
 
@@ -652,7 +652,7 @@ export async function createUser(userData) {
         .single()
 
     if (error) {
-        console.error('❌ Erreur createUser:', error.message)
+        console.error(' Erreur createUser:', error.message)
         return null
     }
 
@@ -718,7 +718,7 @@ export async function updateUser(id, updates) {
         .single()
 
     if (error) {
-        console.error('❌ Erreur updateUser:', error.message)
+        console.error(' Erreur updateUser:', error.message)
         return null
     }
 
@@ -751,11 +751,44 @@ export async function fetchUsers() {
         .order('created_at', { ascending: false })
 
     if (error) {
-        console.error('❌ Erreur fetchUsers:', error.message)
+        console.error(' Erreur fetchUsers:', error.message)
         return []
     }
 
     return data.map(fromSupabaseUser)
+}
+
+export async function deleteUser(id) {
+    const { error } = await supabase.from('users').delete().eq('id', id)
+    if (error) { console.error('❌ deleteUser:', error.message); return false }
+    return true
+}
+
+// ============================
+// Signalements (reports)
+// ============================
+
+export async function reportEvent({ eventId, reporterPhone, reason }) {
+    const { error } = await supabase
+        .from('reports')
+        .insert({ event_id: eventId, reporter_phone: reporterPhone, reason, status: 'pending' })
+    if (error) { console.error('❌ reportEvent:', error.message); return false }
+    return true
+}
+
+export async function fetchReports() {
+    const { data, error } = await supabase
+        .from('reports')
+        .select('*, events(title, organizer)')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+    if (error) { console.error('❌ fetchReports:', error.message); return [] }
+    return data || []
+}
+
+export async function updateReportStatus(id, status) {
+    const { error } = await supabase.from('reports').update({ status }).eq('id', id)
+    if (error) console.error('❌ updateReportStatus:', error.message)
 }
 
 // ============================

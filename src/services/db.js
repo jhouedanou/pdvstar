@@ -14,7 +14,7 @@ class MockDB {
                           this.events.value.filter(e => e.coords).length < 15 // If less than 15 events have coords
         
         if (needsReset) {
-            console.log('🔄 Reinitializing events with coordinates...')
+            console.log(' Reinitializing events with coordinates...')
             this.seedEvents()
         }
     }

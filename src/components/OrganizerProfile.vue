@@ -254,7 +254,7 @@ const formatDate = (dateStr) => {
                         
                         <!-- Premium Features -->
                         <div v-if="selectedEvent.isPremium && selectedEvent.features?.length" class="mb-4">
-                            <h3 class="text-sm font-bold text-gray-900 dark:text-white mb-2">✨ Avantages Premium</h3>
+                            <h3 class="text-sm font-bold text-gray-900 dark:text-white mb-2"> Avantages Premium</h3>
                             <div class="flex flex-wrap gap-2">
                                 <span 
                                     v-for="feature in selectedEvent.features" 

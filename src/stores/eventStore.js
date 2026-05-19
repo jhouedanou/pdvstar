@@ -37,7 +37,7 @@ export const useEventStore = defineStore('events', () => {
                 const hasFutureSeeds = seedEvents.some(e => e.date && new Date(e.date) >= today)
                 
                 if (seedEvents.length > 0 && !hasFutureSeeds) {
-                    console.log('🔄 Events seed périmés, re-seed avec dates fraîches...')
+                    console.log(' Events seed périmés, re-seed avec dates fraîches...')
                     // Supprimer les anciens seeds et insérer de nouveaux
                     for (const e of seedEvents) {
                         await supaDeleteEvent(e.id)
@@ -51,26 +51,26 @@ export const useEventStore = defineStore('events', () => {
                         // Garder les events créés par les utilisateurs + les nouveaux seeds
                         const userEvents = supaEvents.filter(e => e.createdBy)
                         events.value = [...userEvents, ...seeded]
-                        console.log(`✅ ${seeded.length} events re-seedés avec dates fraîches`)
+                        console.log(` ${seeded.length} events re-seedés avec dates fraîches`)
                     }
                 }
             } else {
                 // Table vide → seed avec les données locales
-                console.log('📦 Table Supabase vide, insertion des données seed...')
+                console.log(' Table Supabase vide, insertion des données seed...')
                 db.seedEvents() // Forcer la régénération
                 const localEvents = db.getEvents()
                 const seeded = await supaSeedEvents(localEvents)
                 if (seeded.length > 0) {
                     events.value = seeded
-                    console.log(`✅ ${seeded.length} événements insérés dans Supabase`)
+                    console.log(` ${seeded.length} événements insérés dans Supabase`)
                 } else {
                     // Fallback local si le seed échoue
-                    console.warn('⚠️ Seed Supabase échoué, utilisation des données locales')
+                    console.warn('️ Seed Supabase échoué, utilisation des données locales')
                     events.value = localEvents
                 }
             }
         } catch (error) {
-            console.error('❌ Erreur chargement Supabase, fallback local:', error)
+            console.error(' Erreur chargement Supabase, fallback local:', error)
             db.seedEvents() // Régénérer avec dates fraîches
             events.value = db.getEvents()
         } finally {
@@ -87,7 +87,7 @@ export const useEventStore = defineStore('events', () => {
                 return newEvent
             }
         } catch (error) {
-            console.error('❌ Erreur ajout Supabase, fallback local:', error)
+            console.error(' Erreur ajout Supabase, fallback local:', error)
         }
         // Fallback local
         const localEvent = db.createEvent(eventData)
@@ -110,7 +110,7 @@ export const useEventStore = defineStore('events', () => {
                 events.value[idx] = updated
             }
         } catch (error) {
-            console.error('❌ Erreur update Supabase:', error)
+            console.error(' Erreur update Supabase:', error)
             // L'update optimiste reste en place
         }
     }
@@ -127,7 +127,7 @@ export const useEventStore = defineStore('events', () => {
                 events.value = previousEvents
             }
         } catch (error) {
-            console.error('❌ Erreur delete Supabase:', error)
+            console.error(' Erreur delete Supabase:', error)
             events.value = previousEvents
         }
     }

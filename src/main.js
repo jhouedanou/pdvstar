@@ -19,6 +19,11 @@ import ProfilePage from './views/ProfilePage.vue'
 import OrganizerEventDetail from './views/OrganizerEventDetail.vue'
 import AdminEventDetail from './views/AdminEventDetail.vue'
 import AdminStats from './views/AdminStats.vue'
+import AdminSplash from './views/AdminSplash.vue'
+import AdminMedia from './views/AdminMedia.vue'
+import AdminSettings from './views/AdminSettings.vue'
+import AdminUsers from './views/AdminUsers.vue'
+import AdminReports from './views/AdminReports.vue'
 
 const routes = [
     { path: '/', component: FeedUser }, // Default to User Feed
@@ -35,6 +40,11 @@ const routes = [
     { path: '/admin/events/:id', component: AdminEventDetail, meta: { requiresAdmin: true } },
     { path: '/admin/ads', component: AdsDashboard, meta: { requiresAdmin: true } },
     { path: '/admin/stats', component: AdminStats, meta: { requiresAdmin: true } },
+    { path: '/admin/media', component: AdminMedia, meta: { requiresAdmin: true } },
+    { path: '/admin/splash', component: AdminSplash, meta: { requiresAdmin: true } },
+    { path: '/admin/settings', component: AdminSettings, meta: { requiresAdmin: true } },
+    { path: '/admin/users', component: AdminUsers, meta: { requiresAdmin: true } },
+    { path: '/admin/reports', component: AdminReports, meta: { requiresAdmin: true } },
     { path: '/billet/:id', component: TicketPurchase },
     { path: '/billet/scan', component: TicketScan, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/legal', component: LegalPages },

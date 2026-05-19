@@ -6,7 +6,7 @@ export async function fetchTags() {
         .select('*')
         .order('sort_order', { ascending: true })
     if (error) {
-        console.error('❌ fetchTags:', error.message)
+        console.error(' fetchTags:', error.message)
         return []
     }
     return data
@@ -19,7 +19,7 @@ export async function createTag({ slug, label, emoji = null, color = null, sortO
         .select()
         .single()
     if (error) {
-        console.error('❌ createTag:', error.message)
+        console.error(' createTag:', error.message)
         return null
     }
     return data
@@ -28,7 +28,7 @@ export async function createTag({ slug, label, emoji = null, color = null, sortO
 export async function deleteTag(id) {
     const { error } = await supabase.from('tags').delete().eq('id', id)
     if (error) {
-        console.error('❌ deleteTag:', error.message)
+        console.error(' deleteTag:', error.message)
         return false
     }
     return true
@@ -43,7 +43,7 @@ export async function updateTag(id, updates) {
     if (updates.sortOrder !== undefined) mapped.sort_order = updates.sortOrder
     const { data, error } = await supabase.from('tags').update(mapped).eq('id', id).select().single()
     if (error) {
-        console.error('❌ updateTag:', error.message)
+        console.error(' updateTag:', error.message)
         return null
     }
     return data

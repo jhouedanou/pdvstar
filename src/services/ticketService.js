@@ -37,7 +37,7 @@ export async function createTicket({ eventId, buyerId = null, buyerPhone, buyerP
         .select()
         .single()
     if (error) {
-        console.error('❌ createTicket:', error.message)
+        console.error(' createTicket:', error.message)
         return null
     }
     return data
@@ -51,7 +51,7 @@ export async function markTicketPaid(ticketId, paymentRef) {
         .select()
         .single()
     if (error) {
-        console.error('❌ markTicketPaid:', error.message)
+        console.error(' markTicketPaid:', error.message)
         return null
     }
     return data
@@ -60,7 +60,7 @@ export async function markTicketPaid(ticketId, paymentRef) {
 export async function redeemTicket(qrToken, adminId) {
     const { data, error } = await supabase.rpc('redeem_ticket', { token: qrToken, admin_uid: adminId })
     if (error) {
-        console.error('❌ redeemTicket:', error.message)
+        console.error(' redeemTicket:', error.message)
         return { ok: false, reason: error.message }
     }
     return { ok: true, ticket: data }
@@ -73,7 +73,7 @@ export async function fetchTicketsForEvent(eventId) {
         .eq('event_id', eventId)
         .order('created_at', { ascending: false })
     if (error) {
-        console.error('❌ fetchTicketsForEvent:', error.message)
+        console.error(' fetchTicketsForEvent:', error.message)
         return []
     }
     return data
@@ -86,7 +86,7 @@ export async function fetchTicketsForBuyer(buyerId) {
         .eq('buyer_id', buyerId)
         .order('created_at', { ascending: false })
     if (error) {
-        console.error('❌ fetchTicketsForBuyer:', error.message)
+        console.error(' fetchTicketsForBuyer:', error.message)
         return []
     }
     return data
@@ -102,7 +102,7 @@ export async function buildQrDataUrl(token) {
         const QR = await import(/* @vite-ignore */ modName)
         return await QR.toDataURL(token, { width: 320, margin: 1, errorCorrectionLevel: 'H' })
     } catch (e) {
-        console.warn('⚠️ qrcode npm absent, fallback URL externe:', e?.message)
+        console.warn('️ qrcode npm absent, fallback URL externe:', e?.message)
         // Fallback CDN (api gratuite, à remplacer en prod)
         return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(token)}`
     }

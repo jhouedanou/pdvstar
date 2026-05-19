@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useGeolocation } from '@vueuse/core'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
-import { processImage } from '../utils/imageUpload'
+import { processImage, processAndUpload } from '../utils/imageUpload'
 import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, MapPin, Ticket, Type } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -68,15 +68,25 @@ const handleFileChange = async (e) => {
     const file = e.target.files[0]
     if (!file) return
     imageError.value = ''
-    const result = await processImage(file)
-    if (!result.success) {
-        imageError.value = result.error
+    // Preview rapide en base64 d'abord
+    const compressed = await processImage(file)
+    if (!compressed.success) {
+        imageError.value = compressed.error
         return
     }
-    form.value.preview = result.data
-    form.value.image = result.data
-    form.value.mediaUrl = result.data
-    form.value.mediaType = 'image'
+    form.value.preview = compressed.data
+    // Upload en bucket en parallèle (fallback base64 si bucket KO)
+    const uploaded = await processAndUpload(file, 'events')
+    if (uploaded.success) {
+        form.value.image = uploaded.data
+        form.value.mediaUrl = uploaded.data
+        form.value.mediaType = 'image'
+    } else {
+        form.value.image = compressed.data
+        form.value.mediaUrl = compressed.data
+        form.value.mediaType = 'image'
+        imageError.value = uploaded.error || 'Upload bucket échoué, image stockée en base64'
+    }
 }
 
 const useCurrentPosition = () => {

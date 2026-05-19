@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { createTicket, markTicketPaid, buildQrDataUrl } from '../services/ticketService'
-import { initDeposit, waitForDepositFinal, predictProvider, PAWAPAY_PROVIDERS_CI } from '../services/paymentService'
+import { initDeposit, waitForDepositFinal, predictProvider, PAWAPAY_PROVIDERS_CI, isPaymentConfigured } from '../services/paymentService'
 import { ArrowLeft, Ticket, Loader2, CheckCircle2, XCircle } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -24,6 +24,7 @@ const isProcessing = ref(false)
 const step = ref('form')  // form | paying | success | failed
 const errorMsg = ref('')
 const failureReason = ref('')
+const paymentReady = isPaymentConfigured()
 
 onMounted(async () => {
     if (!eventStore.events.length) await eventStore.loadEvents()
@@ -38,6 +39,10 @@ const detect = async () => {
 
 const buy = async () => {
     errorMsg.value = ''
+    if (!paymentReady) {
+        errorMsg.value = 'Reservation bientot disponible'
+        return
+    }
     if (!event.value) { errorMsg.value = 'Événement introuvable'; return }
     if (!phone.value) { errorMsg.value = 'Numéro requis'; return }
     if (!provider.value) { errorMsg.value = 'Opérateur requis'; return }
@@ -111,8 +116,14 @@ const buy = async () => {
           </div>
         </div>
 
+        <div v-if="!paymentReady" class="bg-surface border border-gray-800 rounded-xl p-5 text-center">
+          <Ticket class="w-10 h-10 text-primary mx-auto mb-3" />
+          <h3 class="font-bold text-lg mb-2">Reservation bientot disponible</h3>
+          <p class="text-gray-400 text-sm">La billetterie est preparee, mais le paiement n'est pas encore configure.</p>
+        </div>
+
         <!-- Form -->
-        <div v-if="step === 'form'" class="space-y-4">
+        <div v-else-if="step === 'form'" class="space-y-4">
           <div>
             <label class="text-sm text-gray-400">Numéro Mobile Money (international, ex: 22507XXXXXXXX)</label>
             <input v-model="phone" @blur="detect" type="tel"

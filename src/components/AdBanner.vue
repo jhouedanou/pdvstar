@@ -66,7 +66,7 @@ const shareAd = async () => {
     <!-- Sponsored Label (Top Right) -->
     <div class="absolute top-20 right-4 z-20">
         <div class="bg-yellow-400/90 backdrop-blur-sm text-black px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-lg animate-pulse">
-            <span>📢</span>
+            <span></span>
             <span>SPONSORISÉ</span>
         </div>
     </div>
@@ -102,7 +102,7 @@ const shareAd = async () => {
     <div class="event-content relative z-10 w-full pl-4 pr-16 pb-4 mb-20 flex flex-col items-start space-y-2 pointer-events-none">
       <!-- Ad Badge -->
       <div class="bg-yellow-400/90 backdrop-blur-md text-black px-3 py-1.5 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg inline-block transition-all group-hover:bg-yellow-500">
-        ✨ {{ ad.sponsor }}
+         {{ ad.sponsor }}
       </div>
 
       <div class="max-w-[85%]">

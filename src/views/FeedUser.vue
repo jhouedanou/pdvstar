@@ -4,7 +4,8 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX } from 'lucide-vue-next'
+import { reportEvent } from '../services/supabase'
 import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import OrganizerProfile from '../components/OrganizerProfile.vue'
@@ -40,7 +41,8 @@ const currentSlideIndex = ref(0)
 // Mute state for current event music (son activé par défaut)
 const isMuted = ref(false)
 
-const appName = 'Babi Vibes'
+const appName = localStorage.getItem('pdvstar_app_name') || 'BABI VIBES'
+const appTagline = localStorage.getItem('pdvstar_app_tagline') || "La nightlife d'Abidjan à portée de main"
 
 const feedDateFilter = ref('all')
 const feedPriceFilter = ref('all')
@@ -62,9 +64,40 @@ const feedPriceOptions = [
 // Splash screen : simule la première interaction pour débloquer l'autoplay audio
 const hasInteracted = ref(false)
 
+const DEFAULT_SPLASH = [
+    '/splashscreen/01.png',
+    '/splashscreen/02.png',
+    '/splashscreen/03.png',
+    '/splashscreen/04.png'
+]
+
+const splashImages = computed(() => {
+    try {
+        const stored = localStorage.getItem('pdvstar_splash_images')
+        if (stored) {
+            const arr = JSON.parse(stored)
+            if (Array.isArray(arr) && arr.length) return arr
+        }
+    } catch {}
+    return DEFAULT_SPLASH
+})
+
+const splashSlide = ref(0)
+let splashTimer = null
+
+onMounted(() => {
+    splashTimer = setInterval(() => {
+        if (!hasInteracted.value) {
+            splashSlide.value = (splashSlide.value + 1) % splashImages.value.length
+        }
+    }, 5000)
+})
+
+onUnmounted(() => { clearInterval(splashTimer) })
+
 const enterApp = () => {
     hasInteracted.value = true
-    // Petit délai pour laisser le DOM charger les iframes avant de lancer la lecture
+    clearInterval(splashTimer)
     setTimeout(() => syncYouTubePlayback(), 500)
 }
 
@@ -141,13 +174,14 @@ const isWithinFeedDateFilter = (event) => {
     }
 
     if (feedDateFilter.value === 'weekend') {
+        // Prochain samedi/dimanche (dans les 14 jours) OU n'importe quel weekend passé/futur
         const day = eventDate.getDay()
         return day === 0 || day === 6
     }
 
     if (feedDateFilter.value === 'this_week') {
         const endOfWeek = new Date(today)
-        endOfWeek.setDate(endOfWeek.getDate() + (7 - endOfWeek.getDay()))
+        endOfWeek.setDate(endOfWeek.getDate() + 7)
         endOfWeek.setHours(23, 59, 59, 999)
         return eventDate >= today && eventDate <= endOfWeek
     }
@@ -155,13 +189,26 @@ const isWithinFeedDateFilter = (event) => {
     return true
 }
 
+const userHasCoords = computed(() => {
+    const lat = coords.value?.latitude
+    return lat && lat !== Infinity && !isNaN(lat)
+})
+
 const matchesFeedFilters = (event) => {
     if (!isWithinFeedDateFilter(event)) return false
-    if (feedPriceFilter.value === 'free' && (event.ticketingEnabled || event.price > 0 || event.ticketPrice > 0)) return false
-    if (feedPriceFilter.value === 'paid' && !(event.ticketingEnabled || event.price > 0 || event.ticketPrice > 0)) return false
+
+    // Filtre prix : "paid" = ticket activé OU price renseigné > 0
+    const isPaid = event.ticketingEnabled || (event.ticketPrice > 0) || (event.price > 0)
+    if (feedPriceFilter.value === 'free' && isPaid) return false
+    if (feedPriceFilter.value === 'paid' && !isPaid) return false
+
+    // Filtre proche : ignorer si géoloc indisponible
     if (feedNearMeOnly.value) {
-        if (!coords.value?.latitude || !event.coords?.lat) return false
-        return getDistanceFromLatLonInKm(coords.value.latitude, coords.value.longitude, event.coords.lat, event.coords.lng) <= 10
+        if (!userHasCoords.value || !event.coords?.lat) return true // fallback tout montrer
+        return getDistanceFromLatLonInKm(
+            coords.value.latitude, coords.value.longitude,
+            event.coords.lat, event.coords.lng
+        ) <= 15
     }
     return true
 }
@@ -764,17 +811,11 @@ const priceFilterOptions = [
 const filteredEvents = computed(() => {
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    
-    // Events approuvés
-    const approved = eventStore.events
+
+    // Tous events approuvés — inclure passés aussi pour recherche complète
+    let results = eventStore.events
         .filter(e => !!e.date)
-        .filter(e => !e.status || e.status === 'approved') // modération
-    
-    // Prioriser les events à venir ; sinon fallback sur les récents
-    const upcoming = approved.filter(e => new Date(e.date) >= today)
-    let results = upcoming.length > 0
-        ? upcoming
-        : approved.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20)
+        .filter(e => !e.status || e.status === 'approved')
     
     // Filtre premium
     if (showPremiumOnly.value) {
@@ -805,9 +846,15 @@ const filteredEvents = computed(() => {
                 return d >= today && d < tomorrow
             })
         } else if (searchDateFilter.value === 'this_week') {
-            results = results.filter(e => new Date(e.date) <= endOfWeek)
+            results = results.filter(e => {
+                const d = new Date(e.date)
+                return d >= today && d <= endOfWeek
+            })
         } else if (searchDateFilter.value === 'this_month') {
-            results = results.filter(e => new Date(e.date) <= endOfMonth)
+            results = results.filter(e => {
+                const d = new Date(e.date)
+                return d >= today && d <= endOfMonth
+            })
         }
     }
 
@@ -1019,6 +1066,46 @@ const openVTC = (provider) => {
     if (url) window.open(url, '_blank')
 }
 
+// Dismiss premium overlay per-event
+const dismissedPremium = ref(new Set())
+const dismissPremium = (eventId) => {
+    dismissedPremium.value = new Set([...dismissedPremium.value, eventId])
+}
+
+const handleLogout = () => {
+    if (!confirm('Se déconnecter ?')) return
+    userStore.logout()
+    showProfile.value = false
+    router.push('/')
+}
+
+// Signalement event
+const reportingEvent = ref(null)
+const reportReason = ref('')
+const reportSent = ref(false)
+const reportLoading = ref(false)
+
+const openReport = (event) => {
+    reportingEvent.value = event
+    reportReason.value = ''
+    reportSent.value = false
+}
+
+const submitReport = async () => {
+    if (!reportReason.value.trim()) return
+    reportLoading.value = true
+    const ok = await reportEvent({
+        eventId: reportingEvent.value.id,
+        reporterPhone: userStore.user?.phone || 'anonymous',
+        reason: reportReason.value.trim()
+    })
+    reportLoading.value = false
+    if (ok) {
+        reportSent.value = true
+        setTimeout(() => { reportingEvent.value = null }, 2000)
+    }
+}
+
 const handleShare = async (event) => {
     try {
         trackEventInteraction({
@@ -1222,43 +1309,66 @@ const handleDeleteEvent = async (eventId) => {
 
     <!-- SPLASH SCREEN — débloque l'autoplay audio navigateur -->
     <Transition name="splash">
-      <div 
+      <div
         v-if="!hasInteracted"
         @click="enterApp"
         @touchstart.passive="enterApp"
-        class="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center cursor-pointer select-none"
+        class="fixed inset-0 z-[100] cursor-pointer select-none overflow-hidden bg-black"
       >
-        <div class="flex flex-col items-center gap-6 animate-pulse">
-          <img src="/appIcon.svg" alt="Babi Vibes" class="w-24 h-24" />
-          <h1 class="text-4xl font-black text-primary tracking-tight">BABI VIBES</h1>
-          <p class="text-gray-400 text-sm">La nightlife d'Abidjan à portée de main</p>
+        <!-- Ken Burns Slideshow -->
+        <div
+          v-for="(img, i) in splashImages"
+          :key="img"
+          class="splash-slide"
+          :class="[`kb-${(i % 4) + 1}`, { active: splashSlide === i }]"
+          :style="{ backgroundImage: `url(${img})` }"
+        />
+
+        <!-- Gradient overlay atténué -->
+        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent z-10" />
+
+        <!-- Content -->
+        <div class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4">
+          <img src="/appIcon.svg" alt="Babi Vibes" class="w-20 h-20 drop-shadow-2xl" />
+          <h1 class="text-4xl font-black text-primary tracking-tight drop-shadow-xl">{{ appName }}</h1>
+          <p class="text-gray-300 text-sm">{{ appTagline }}</p>
         </div>
-        <div class="mt-12 flex flex-col items-center gap-3">
-          <div class="bg-primary/20 border border-primary/40 text-primary px-8 py-3 rounded-full text-lg font-bold animate-bounce">
+
+        <!-- CTA bottom -->
+        <div class="absolute bottom-16 inset-x-0 z-20 flex flex-col items-center gap-3">
+          <div class="bg-primary text-black px-10 py-3 rounded-full text-base font-black animate-bounce shadow-lg shadow-primary/30">
             Toucher pour entrer
           </div>
-          <p class="text-gray-600 text-xs mt-2">La musique sera activee</p>
+          <p class="text-gray-500 text-xs">La musique sera activée</p>
+        </div>
+
+        <!-- Slide dots -->
+        <div class="absolute bottom-6 inset-x-0 z-20 flex justify-center gap-1.5">
+          <div
+            v-for="(_, i) in splashImages" :key="i"
+            class="w-1.5 h-1.5 rounded-full transition-all duration-500"
+            :class="splashSlide === i ? 'bg-primary w-4' : 'bg-white/30'"
+          />
         </div>
       </div>
     </Transition>
 
-    <!-- Header (Floating) -->
-    <!-- Header (Standard TikTok Style) -->
-    <div class="header-tabs absolute top-0 w-full z-20 pt-14 pb-4 bg-gradient-to-b from-black/80 to-transparent flex justify-center items-center gap-6 text-white font-bold drop-shadow-md pointer-events-auto transition-all duration-300">
-       <div class="flex items-center gap-4">
-            <button 
+    <!-- Header pill -->
+    <div class="header-tabs absolute top-0 w-full z-20 pt-12 pb-3 flex justify-center items-center pointer-events-auto">
+       <div class="flex items-center gap-2 bg-black/50 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10">
+            <img src="/appIcon.svg" alt="logo" class="w-5 h-5 opacity-90" />
+            <span class="text-white text-sm font-bold tracking-wide">{{ appName }}</span>
+            <div class="w-px h-4 bg-white/20 mx-1" />
+            <button
                 @click="activeTab = 'map'"
-                class="text-white/80 hover:text-white transition transform active:scale-95 flex flex-col items-center">
-                <MapIcon class="w-6 h-6" />
-                <span class="text-[10px] font-normal">Carte</span>
+                class="flex items-center gap-1 text-white/70 hover:text-white transition active:scale-95">
+                <Compass class="w-4 h-4" />
+                <span class="text-[10px]">Carte</span>
             </button>
-            <div class="text-white text-xl font-bold border-b-2 border-primary pb-0.5 shadow-lg">
-                BABI VIBES
-            </div>
        </div>
     </div>
 
-    <div class="absolute top-28 left-0 right-0 z-20 px-3 pointer-events-auto">
+    <div class="absolute top-24 left-0 right-0 z-20 px-3 pointer-events-auto">
       <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
         <button
           v-for="opt in feedDateOptions"
@@ -1270,26 +1380,41 @@ const handleDeleteEvent = async (eventId) => {
           {{ opt.l }}
         </button>
         <button
-          v-for="opt in feedPriceOptions"
-          :key="opt.v"
-          @click="feedPriceFilter = opt.v"
-          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
-          :class="feedPriceFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
-        >
-          {{ opt.l }}
-        </button>
-        <button
           @click="feedNearMeOnly = !feedNearMeOnly"
-          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition flex items-center gap-1"
           :class="feedNearMeOnly ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
+          :title="feedNearMeOnly && !userHasCoords ? 'Activer la géolocalisation' : ''"
         >
+          <MapPin class="w-3 h-3" />
           Proche
+          <span v-if="feedNearMeOnly && !userHasCoords" class="text-[8px] opacity-70">(!)</span>
+        </button>
+        <!-- Reset tous filtres -->
+        <button
+          v-if="feedDateFilter !== 'all' || feedPriceFilter !== 'all' || feedNearMeOnly"
+          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition bg-red-500/20 text-red-400 border-red-500/30"
+        >
+          Réinitialiser
         </button>
       </div>
     </div>
 
     <!-- MAIN FEED VIEW -->
     <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll no-scrollbar">
+      <!-- Aucun résultat pour filtre actif -->
+      <div v-if="feedItems.length === 0"
+        class="snap-start h-screen w-full flex flex-col items-center justify-center gap-4 text-center px-8">
+        <SearchX class="w-16 h-16 text-gray-700" />
+        <p class="text-gray-400 font-bold text-lg">Aucun événement</p>
+        <p class="text-gray-600 text-sm">Aucun résultat pour ce filtre.</p>
+        <button
+          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false"
+          class="bg-primary text-black font-bold px-6 py-2.5 rounded-full text-sm mt-2"
+        >
+          Voir tous les événements
+        </button>
+      </div>
       <template v-for="(item, itemIndex) in feedItems" :key="item.type === 'event' ? item.data.id : item.data.id">
         <!-- AD SLIDE -->
         <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
@@ -1348,20 +1473,40 @@ const handleDeleteEvent = async (eventId) => {
             </div>
         </div>
 
-        <!-- Premium Lock Overlay (si pas de pass actif) -->
-        <div v-if="item.data.isPremium && !userStore.canAccessPremium" 
-          class="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          @click="showPassShop = true">
-          <div class="text-center px-8 py-6 max-w-[280px]">
-            <div class="bg-yellow-500/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lock class="w-8 h-8 text-yellow-400" />
+        <!-- Premium Lock Overlay — bottomsheet -->
+        <div v-if="item.data.isPremium && !userStore.canAccessPremium && !dismissedPremium.has(item.data.id)"
+          class="absolute inset-0 z-30 bg-black/50 backdrop-blur-sm flex flex-col justify-end">
+          <!-- Dismiss tap on blur zone -->
+          <div class="flex-1" @click.stop="dismissPremium(item.data.id)" />
+          <!-- Bottomsheet -->
+          <div class="bg-gray-950 border-t border-gray-800 rounded-t-3xl px-6 pt-5 pb-10"
+            @click.stop>
+            <!-- Handle -->
+            <div class="w-10 h-1 bg-gray-700 rounded-full mx-auto mb-5" />
+            <div class="flex items-start justify-between mb-4">
+              <div class="flex items-center gap-3">
+                <div class="bg-yellow-500/20 w-12 h-12 rounded-2xl flex items-center justify-center">
+                  <Lock class="w-6 h-6 text-yellow-400" />
+                </div>
+                <div>
+                  <h3 class="text-white font-black text-base">Contenu Premium</h3>
+                  <p class="text-gray-400 text-xs mt-0.5">Accès réservé aux détenteurs de pass</p>
+                </div>
+              </div>
+              <button @click.stop="dismissPremium(item.data.id)"
+                class="bg-gray-800 rounded-full p-1.5 text-gray-400 hover:text-white transition">
+                <X class="w-4 h-4" />
+              </button>
             </div>
-            <h3 class="text-white font-black text-lg mb-1">Contenu Premium</h3>
-            <p class="text-gray-300 text-sm mb-4">Obtenez un pass pour accéder à cet événement</p>
-            <div class="bg-gradient-to-r from-yellow-400 to-orange-500 text-black font-black px-6 py-2.5 rounded-full text-sm inline-flex items-center gap-2 shadow-lg">
+            <button @click.stop="showPassShop = true"
+              class="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-black font-black py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2 shadow-lg">
               <Ticket class="w-4 h-4" />
               Obtenir un Pass
-            </div>
+            </button>
+            <button @click.stop="dismissPremium(item.data.id)"
+              class="w-full mt-3 text-gray-500 text-xs py-2 text-center">
+              Continuer sans pass
+            </button>
           </div>
         </div>
         
@@ -1415,6 +1560,13 @@ const handleDeleteEvent = async (eventId) => {
                 <Share2 class="w-6 h-6 text-white"/>
              </div>
              <span class="action-button-text text-xs font-semibold drop-shadow-md">Partager</span>
+           </button>
+
+           <button @click="openReport(item.data)" class="action-button flex flex-col items-center gap-1 group">
+             <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
+               <Flag class="w-5 h-5 text-orange-400"/>
+             </div>
+             <span class="action-button-text text-xs font-semibold drop-shadow-md text-orange-400">Signaler</span>
            </button>
 
            <!-- Mute / Unmute Button -->
@@ -1774,7 +1926,7 @@ const handleDeleteEvent = async (eventId) => {
              <div class="px-6 py-4 flex justify-between items-end border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-black/80 backdrop-blur-md sticky top-0 z-10 transition-colors duration-300">
                 <div>
                     <h1 class="text-3xl font-black italic tracking-tighter text-gray-900 dark:text-white">MON PROFIL</h1>
-                    <p class="text-primary text-sm font-medium">{{ userStore.user?.name || 'Visiteur' }}</p>
+                    <p class="text-amber-700 dark:text-primary text-sm font-medium">{{ userStore.user?.name || 'Visiteur' }}</p>
                 </div>
                 <button @click="toggleTheme" class="bg-gray-200 dark:bg-gray-800 p-2 rounded-full text-black dark:text-white transition">
                     <Moon v-if="!(isDarkMode)" class="w-6 h-6" />
@@ -1858,29 +2010,21 @@ const handleDeleteEvent = async (eventId) => {
 
                      <!-- Quick Actions -->
                      <div class="border-t border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2">
-                       <!-- Espace Admin -->
+                       <!-- Espace Admin (visible si session admin uniquement) -->
                        <button
                          v-if="adminStore.isAuthenticated"
                          @click="router.push('/admin/dashboard')"
-                         class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-red-500/20"
+                         class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-red-500/20"
                        >
                          <Shield class="w-5 h-5" />
                          Espace Admin
-                       </button>
-                       <button
-                         v-else
-                         @click="router.push('/admin')"
-                         class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
-                       >
-                         <LogIn class="w-4 h-4" />
-                         Connexion Admin
                        </button>
 
                        <!-- Espace Organisateur -->
                        <button
                          v-if="userStore.isOrganizer"
                          @click="router.push('/pro')"
-                         class="w-full bg-primary/10 hover:bg-primary/20 text-primary font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-primary/20"
+                         class="w-full bg-primary/20 hover:bg-primary/30 text-gray-900 dark:text-primary font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-primary/30"
                        >
                          <Store class="w-5 h-5" />
                          Espace Organisateur
@@ -1888,7 +2032,7 @@ const handleDeleteEvent = async (eventId) => {
                        <button
                          v-else
                          @click="router.push('/pro')"
-                         class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                         class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                        >
                          <Store class="w-4 h-4" />
                          Devenir Organisateur
@@ -1898,26 +2042,36 @@ const handleDeleteEvent = async (eventId) => {
                        <div v-if="userStore.isOrganizer" class="flex gap-2">
                          <button
                            @click="router.push('/pro/create')"
-                           class="flex-1 bg-primary/10 hover:bg-primary/20 text-primary font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                           class="flex-1 bg-primary/20 hover:bg-primary/30 text-gray-900 dark:text-primary font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                          >
                            <Plus class="w-4 h-4" />
                            Créer event
                          </button>
                          <button
-                           @click="router.push('/admin/ads')"
-                           class="flex-1 bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                           @click="router.push('/organizer/ads')"
+                           class="flex-1 bg-yellow-400/20 hover:bg-yellow-400/30 text-yellow-700 dark:text-yellow-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                          >
                            <Store class="w-4 h-4" />
                            Mes pubs
                          </button>
                          <button
                            @click="router.push('/billet/scan')"
-                           class="flex-1 bg-green-500/10 hover:bg-green-500/20 text-green-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                           class="flex-1 bg-green-500/20 hover:bg-green-500/30 text-green-700 dark:text-green-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                          >
                            <ScanLine class="w-4 h-4" />
                            Scan QR
                          </button>
                        </div>
+
+                       <!-- Déconnexion -->
+                       <button
+                         v-if="userStore.user"
+                         @click="handleLogout"
+                         class="w-full mt-2 bg-gray-100 dark:bg-gray-800 hover:bg-red-500/10 text-gray-600 dark:text-gray-400 hover:text-red-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs border-t border-gray-200 dark:border-gray-700"
+                       >
+                         <LogIn class="w-4 h-4 rotate-180" />
+                         Déconnexion
+                       </button>
                      </div>
                    </div>
                  </div>
@@ -2108,7 +2262,7 @@ const handleDeleteEvent = async (eventId) => {
                         <div class="flex-1">
                             <h4 class="font-bold text-gray-900 dark:text-white line-clamp-1">{{ event.title }}</h4>
                             <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                <span>📅 {{ new Date(event.date).toLocaleDateString() }}</span>
+                                <span> {{ new Date(event.date).toLocaleDateString() }}</span>
                                 <span>{{ event.location.split(',')[0] }}</span>
                             </div>
                             <span class="inline-block mt-2 text-[10px] bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full font-bold">Confirmé</span>
@@ -2312,7 +2466,7 @@ const handleDeleteEvent = async (eventId) => {
     <!-- Success Message Toast -->
     <transition name="fade">
       <div v-if="messageSuccess" class="fixed top-4 left-4 right-4 bg-green-600 text-white px-4 py-3 rounded-lg shadow-lg z-40 flex items-center gap-2">
-        <span>✓</span>
+        <span></span>
         <span>{{ messageSuccess }}</span>
       </div>
     </transition>
@@ -2320,7 +2474,7 @@ const handleDeleteEvent = async (eventId) => {
     <!-- Error Message Toast -->
     <transition name="fade">
       <div v-if="messageError" class="fixed top-4 left-4 right-4 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg z-40 flex items-center gap-2">
-        <span>✕</span>
+        <span></span>
         <span>{{ messageError }}</span>
       </div>
     </transition>
@@ -2414,19 +2568,21 @@ const handleDeleteEvent = async (eventId) => {
                           WhatsApp
                       </button>
                     </div>
-                    <!-- Ligne 2 : VTC Deep Links -->
+                    <!-- Ligne 2 : VTC Deep Links — Uber/Yango désactivés (intégration incomplète) -->
                     <div v-if="selectedMapEvent?.coords" class="flex gap-2">
-                      <button
-                          @click="openVTC('uber')"
-                          class="flex-1 bg-black text-white font-bold py-2.5 px-3 rounded-xl hover:bg-gray-900 transition active:scale-95 flex items-center justify-center gap-2 text-sm border border-gray-700"
+                      <button disabled
+                          class="flex-1 bg-gray-700/40 text-gray-500 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-sm cursor-not-allowed border border-gray-700/40 relative"
+                          title="Intégration Uber en préparation"
                       >
-                          🚕 Uber
+                          Uber
+                          <span class="absolute -top-1 -right-1 bg-gray-800 text-gray-500 text-[8px] px-1.5 py-0.5 rounded-full">bientôt</span>
                       </button>
-                      <button
-                          @click="openVTC('yango')"
-                          class="flex-1 bg-red-600 text-white font-bold py-2.5 px-3 rounded-xl hover:bg-red-700 transition active:scale-95 flex items-center justify-center gap-2 text-sm"
+                      <button disabled
+                          class="flex-1 bg-gray-700/40 text-gray-500 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-sm cursor-not-allowed border border-gray-700/40 relative"
+                          title="Intégration Yango en préparation"
                       >
-                          🚗 Yango
+                          Yango
+                          <span class="absolute -top-1 -right-1 bg-gray-800 text-gray-500 text-[8px] px-1.5 py-0.5 rounded-full">bientôt</span>
                       </button>
                       <button
                           @click="openVTC('waze')"
@@ -2445,6 +2601,39 @@ const handleDeleteEvent = async (eventId) => {
             </div>
         </div>
     </transition>
+
+  <!-- Modal Signalement -->
+  <div v-if="reportingEvent" class="fixed inset-0 bg-black/80 z-[80] flex items-end justify-center p-4" @click.self="reportingEvent = null">
+    <div class="bg-gray-900 rounded-2xl w-full max-w-sm p-5 space-y-4">
+      <div v-if="reportSent" class="text-center py-4">
+        <p class="text-green-400 font-bold text-lg">Signalement envoyé</p>
+        <p class="text-gray-400 text-sm mt-1">Merci, notre équipe va vérifier.</p>
+      </div>
+      <template v-else>
+        <h3 class="font-bold text-white flex items-center gap-2">
+          <Flag class="w-4 h-4 text-orange-400" /> Signaler cet événement
+        </h3>
+        <p class="text-gray-400 text-xs truncate">{{ reportingEvent.title }}</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button v-for="r in ['Contenu inapproprié','Faux événement','Arnaque','Autre']" :key="r"
+            @click="reportReason = r"
+            class="text-xs px-3 py-2 rounded-xl border transition text-left"
+            :class="reportReason === r ? 'border-orange-500 bg-orange-500/10 text-orange-300' : 'border-gray-700 text-gray-400 hover:border-gray-500'">
+            {{ r }}
+          </button>
+        </div>
+        <textarea v-model="reportReason" rows="2" placeholder="Préciser le problème..."
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500 resize-none" />
+        <div class="flex gap-2">
+          <button @click="reportingEvent = null" class="flex-1 py-2.5 rounded-xl bg-gray-800 text-gray-400 text-sm">Annuler</button>
+          <button @click="submitReport" :disabled="!reportReason.trim() || reportLoading"
+            class="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:bg-gray-700 text-white font-bold text-sm transition">
+            {{ reportLoading ? '...' : 'Envoyer' }}
+          </button>
+        </div>
+      </template>
+    </div>
+  </div>
 
   </div>
 </template>
@@ -2476,10 +2665,34 @@ const handleDeleteEvent = async (eventId) => {
 }
 /* Splash screen transition */
 .splash-leave-active {
-    transition: opacity 0.5s ease, transform 0.5s ease;
+    transition: opacity 0.6s ease, transform 0.6s ease;
 }
 .splash-leave-to {
     opacity: 0;
-    transform: scale(1.1);
+    transform: scale(1.05);
 }
+
+/* Ken Burns Slideshow */
+.splash-slide {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+    transition: opacity 1.2s ease;
+    will-change: transform, opacity;
+}
+.splash-slide.active {
+    opacity: 1;
+}
+
+@keyframes kb1 { from { transform: scale(1)    translate(0,   0);    } to { transform: scale(1.18) translate(-2%, -1.5%); } }
+@keyframes kb2 { from { transform: scale(1.1)  translate(-2%, 0);    } to { transform: scale(1)    translate(2%,  1%);    } }
+@keyframes kb3 { from { transform: scale(1)    translate(2%,  1%);   } to { transform: scale(1.15) translate(-1%, -2%);   } }
+@keyframes kb4 { from { transform: scale(1.12) translate(1%,  -1%);  } to { transform: scale(1)    translate(-2%, 2%);    } }
+
+.splash-slide.kb-1.active { animation: kb1 6s ease-in-out forwards; }
+.splash-slide.kb-2.active { animation: kb2 6s ease-in-out forwards; }
+.splash-slide.kb-3.active { animation: kb3 6s ease-in-out forwards; }
+.splash-slide.kb-4.active { animation: kb4 6s ease-in-out forwards; }
 </style>

@@ -15,7 +15,8 @@ import {
     ShieldCheck, ShieldX, Clock, Filter, Eye, EyeOff,
     AlertTriangle, Lock, Ticket, Gift, Ban
 } from 'lucide-vue-next'
-import { PASS_CATALOG } from '../services/supabase'
+import { PASS_CATALOG, fetchUsers, updateUser, deleteUser, fetchReports, updateReportStatus } from '../services/supabase'
+import Combobox from '../components/Combobox.vue'
 import { approveEvent as modApprove, rejectEvent as modReject } from '../services/moderationService'
 import L from 'leaflet'
 
@@ -138,7 +139,7 @@ const openCameraCapture = async () => {
         if (err.name === 'NotAllowedError') {
             cameraPermission.value = 'denied'
         } else if (err.name === 'NotFoundError') {
-            dictationError.value = '⚠️ Aucune caméra détectée sur cet appareil.'
+            dictationError.value = 'Aucune camera detectee sur cet appareil.'
             setTimeout(() => dictationError.value = '', 4000)
         }
     }
@@ -215,7 +216,7 @@ const requestGeoPermission = async () => {
  */
 const useMyGPSLocation = () => {
     if (!navigator.geolocation) {
-        dictationError.value = '⚠️ Géolocalisation non supportée sur cet appareil.'
+        dictationError.value = 'Geolocalisation non supportee sur cet appareil.'
         setTimeout(() => dictationError.value = '', 4000)
         return
     }
@@ -247,16 +248,83 @@ const useMyGPSLocation = () => {
             isLocatingGPS.value = false
             if (error.code === error.PERMISSION_DENIED) {
                 geoPermission.value = 'denied'
-                dictationError.value = '📍 Accès à la localisation refusé. Autorisez la géolocalisation dans les paramètres du navigateur.'
+                dictationError.value = 'Acces a la localisation refuse. Autorisez la geolocalisation dans les parametres du navigateur.'
             } else if (error.code === error.POSITION_UNAVAILABLE) {
-                dictationError.value = '📍 Position GPS indisponible.'
+                dictationError.value = 'Position GPS indisponible.'
             } else {
-                dictationError.value = '📍 Délai de géolocalisation dépassé.'
+                dictationError.value = 'Delai de geolocalisation depasse.'
             }
             setTimeout(() => dictationError.value = '', 4000)
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
+}
+
+// Panel actif : 'events' | 'users' | 'reports'
+const activePanel = ref('events')
+
+// Users management
+const allUsers = ref([])
+const usersLoading = ref(false)
+const userRoleUpdating = ref(null)
+const userDeleting = ref(null)
+
+const loadUsers = async () => {
+    usersLoading.value = true
+    allUsers.value = await fetchUsers()
+    usersLoading.value = false
+}
+
+const setUserRole = async (user, role) => {
+    userRoleUpdating.value = user.id
+    await updateUser(user.id, { role })
+    user.role = role
+    userRoleUpdating.value = null
+}
+
+const removeUser = async (user) => {
+    if (!confirm(`Supprimer ${user.pseudo || user.name} (${user.phone}) ? Action irréversible.`)) return
+    userDeleting.value = user.id
+    const ok = await deleteUser(user.id)
+    if (ok) allUsers.value = allUsers.value.filter(u => u.id !== user.id)
+    userDeleting.value = null
+}
+
+// Reports
+const reports = ref([])
+const reportsLoading = ref(false)
+
+const loadReports = async () => {
+    reportsLoading.value = true
+    reports.value = await fetchReports()
+    reportsLoading.value = false
+}
+
+const dismissReport = async (r) => {
+    await updateReportStatus(r.id, 'dismissed')
+    reports.value = reports.value.filter(x => x.id !== r.id)
+}
+
+const resolveReport = async (r) => {
+    await updateReportStatus(r.id, 'resolved')
+    reports.value = reports.value.filter(x => x.id !== r.id)
+}
+
+// Stat card click : filtre events ou ouvre panel users/reports
+const onStatClick = (type) => {
+    if (type === 'users') {
+        activePanel.value = 'users'
+        if (!allUsers.value.length) loadUsers()
+        return
+    }
+    if (type === 'reports') {
+        activePanel.value = 'reports'
+        loadReports()
+        return
+    }
+    activePanel.value = 'events'
+    const map = { total: 'all', pending: 'pending', approved: 'approved' }
+    if (map[type]) statusFilter.value = map[type]
 }
 
 // State
@@ -267,6 +335,30 @@ const deleteConfirmId = ref(null)
 const statusFilter = ref('all') // all, pending, approved, rejected
 const organizerFilter = ref('')
 const locationFilter = ref('')
+
+// Options uniques dérivées des events
+const organizerOptions = computed(() => {
+    const set = new Set()
+    eventStore.events.forEach(e => { if (e.organizer) set.add(e.organizer) })
+    return [...set].sort()
+})
+
+const locationOptions = computed(() => {
+    const set = new Set()
+    eventStore.events.forEach(e => {
+        if (e.quartier) set.add(e.quartier)
+        if (e.location) set.add(e.location)
+        if (e.ville) set.add(e.ville)
+    })
+    return [...set].sort()
+})
+
+const dateFilterOptionsDashboard = [
+    { value: 'all', label: 'Toutes dates' },
+    { value: 'future', label: 'À venir' },
+    { value: 'today', label: "Aujourd'hui" },
+    { value: 'this_week', label: 'Cette semaine' }
+]
 const dateFilter = ref('all')
 const showRejectModal = ref(false)
 const rejectingEvent = ref(null)
@@ -512,6 +604,31 @@ const events = computed(() => {
         }
     }
     // Tri chronologique : du plus récent au plus ancien
+    if (organizerFilter.value.trim()) {
+        const q = organizerFilter.value.trim().toLowerCase()
+        list = list.filter(e => (e.organizer || e.organizerName || '').toLowerCase().includes(q))
+    }
+    if (locationFilter.value.trim()) {
+        const q = locationFilter.value.trim().toLowerCase()
+        list = list.filter(e => [e.location, e.city, e.ville, e.district, e.quartier].filter(Boolean).join(' ').toLowerCase().includes(q))
+    }
+    if (dateFilter.value !== 'all') {
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const tomorrow = new Date(today)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        const weekEnd = new Date(today)
+        weekEnd.setDate(weekEnd.getDate() + (7 - weekEnd.getDay()))
+        weekEnd.setHours(23, 59, 59, 999)
+
+        if (dateFilter.value === 'today') {
+            list = list.filter(e => new Date(e.date) >= today && new Date(e.date) < tomorrow)
+        } else if (dateFilter.value === 'this_week') {
+            list = list.filter(e => new Date(e.date) >= today && new Date(e.date) <= weekEnd)
+        } else if (dateFilter.value === 'future') {
+            list = list.filter(e => new Date(e.date) >= today)
+        }
+    }
     return list.sort((a, b) => {
         const dateA = new Date(a.date || 0)
         const dateB = new Date(b.date || 0)
@@ -575,12 +692,17 @@ const createEvent = async () => {
         description: form.value.description || 'Pas de description',
         date: form.value.date,
         location: form.value.location || 'Abidjan',
+        locationName: form.value.location || 'Abidjan',
         organizer: form.value.organizer || (isOrganizerMode.value ? (userStore.user?.organizerName || userStore.user?.spaceName || userStore.user?.name) : 'Admin'),
+        organizerName: form.value.organizer || (isOrganizerMode.value ? (userStore.user?.organizerName || userStore.user?.spaceName || userStore.user?.name) : 'Admin'),
+        organizerPhone: userStore.user?.phone || '',
         image: form.value.image || form.value.preview,
+        mediaUrl: form.value.image || form.value.preview,
         coords: form.value.coords,
         isPremium: form.value.isPremium,
         price: form.value.isPremium ? form.value.price : 0,
         features: form.value.features || [],
+        tags: form.value.features || [],
         backgroundMusic: form.value.backgroundMusic || '',
         musicTitle: form.value.musicTitle || '',
         promoText: form.value.promoText || '',
@@ -625,12 +747,16 @@ const updateEvent = async () => {
             description: form.value.description,
             date: form.value.date,
             location: form.value.location,
+            locationName: form.value.location,
             organizer: form.value.organizer,
+            organizerName: form.value.organizer,
             image: form.value.image || form.value.preview,
+            mediaUrl: form.value.image || form.value.preview,
             coords: form.value.coords,
             isPremium: form.value.isPremium,
             price: form.value.isPremium ? form.value.price : 0,
             features: form.value.features || [],
+            tags: form.value.features || [],
             backgroundMusic: form.value.backgroundMusic || '',
             musicTitle: form.value.musicTitle || '',
             promoText: form.value.promoText || '',
@@ -714,14 +840,14 @@ const startDictation = async (field) => {
     dictationError.value = ''
 
     if (!SpeechRecognition) {
-        dictationError.value = '⚠️ Reconnaissance vocale non supportée. Utilisez Chrome ou Edge.'
+        dictationError.value = 'Reconnaissance vocale non supportee. Utilisez Chrome ou Edge.'
         setTimeout(() => dictationError.value = '', 4000)
         return
     }
 
     // Vérifier le contexte sécurisé (HTTPS ou localhost requis)
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        dictationError.value = '⚠️ La dictée vocale nécessite HTTPS. Sur téléphone, utilisez le déploiement Netlify.'
+        dictationError.value = 'La dictee vocale necessite HTTPS. Sur telephone, utilisez le deploiement Netlify.'
         setTimeout(() => dictationError.value = '', 5000)
         return
     }
@@ -730,7 +856,7 @@ const startDictation = async (field) => {
     if (micPermission.value !== 'granted') {
         await requestMicPermission()
         if (micPermission.value === 'denied') {
-            dictationError.value = '🎤 Accès au micro refusé. Autorisez le micro dans les paramètres du navigateur puis rechargez.'
+            dictationError.value = ' Accès au micro refusé. Autorisez le micro dans les paramètres du navigateur puis rechargez.'
             setTimeout(() => dictationError.value = '', 5000)
             return
         }
@@ -783,13 +909,13 @@ const startDictation = async (field) => {
         recordingField.value = ''
         
         if (event.error === 'not-allowed') {
-            dictationError.value = '🎤 Accès au micro refusé. Autorisez le micro dans les paramètres du navigateur.'
+            dictationError.value = ' Accès au micro refusé. Autorisez le micro dans les paramètres du navigateur.'
         } else if (event.error === 'no-speech') {
-            dictationError.value = '🔇 Aucune voix détectée. Parlez plus fort et réessayez.'
+            dictationError.value = ' Aucune voix détectée. Parlez plus fort et réessayez.'
         } else if (event.error === 'network') {
-            dictationError.value = '📡 Erreur réseau. La reconnaissance vocale nécessite une connexion internet.'
+            dictationError.value = ' Erreur réseau. La reconnaissance vocale nécessite une connexion internet.'
         } else {
-            dictationError.value = `⚠️ Erreur: ${event.error}`
+            dictationError.value = `Erreur: ${event.error}`
         }
         setTimeout(() => dictationError.value = '', 4000)
     }
@@ -806,7 +932,7 @@ const startDictation = async (field) => {
         console.error('Erreur démarrage reconnaissance:', e)
         isRecording.value = false
         recordingField.value = ''
-        dictationError.value = '⚠️ Impossible de démarrer la reconnaissance vocale.'
+        dictationError.value = 'Impossible de demarrer la reconnaissance vocale.'
         setTimeout(() => dictationError.value = '', 4000)
     }
 }
@@ -1019,7 +1145,7 @@ const initMapPicker = () => {
     // Marqueur draggable
     const markerIcon = L.divIcon({
         className: 'map-picker-marker',
-        html: '<div style="background:#FFD700;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);">📍</div>',
+        html: '<div style="background:#FFD700;width:32px;height:32px;border-radius:50%;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>',
         iconSize: [32, 32],
         iconAnchor: [16, 32]
     })
@@ -1150,46 +1276,152 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-black">
+  <div class="text-white">
     <!-- Bandeau de connexion -->
     <ConnectionBanner :showOfflineBanner="showOfflineBanner" :showReconnectBanner="showReconnectBanner" :isSyncing="isSyncing" />
-    <!-- Header -->
-    <header class="bg-surface border-b border-gray-800 px-4 py-3 sticky top-0 z-40">
-      <div class="max-w-6xl mx-auto flex justify-between items-center">
-        <div class="flex items-center gap-3">
-          <Store v-if="isOrganizerMode" class="w-5 h-5 text-primary" />
-          <h1 class="text-xl font-bold text-primary">
-            {{ isOrganizerMode ? (userStore.user?.spaceName || 'Mon Espace') : 'Admin Dashboard' }}
-          </h1>
-        </div>
-        <div class="flex items-center gap-4">
-          <router-link to="/" class="text-gray-400 text-sm hover:text-white transition flex items-center gap-1">
-            <ArrowLeft class="w-4 h-4" />
-            {{ isOrganizerMode ? 'Retour au profil' : 'Voir le site' }}
-          </router-link>
-          <button @click="handleLogout" class="flex items-center gap-2 transition" :class="isOrganizerMode ? 'text-gray-400 hover:text-white' : 'text-red-400 hover:text-red-300'">
-            <LogOut v-if="!isOrganizerMode" class="w-4 h-4" />
-            <ArrowLeft v-if="isOrganizerMode" class="w-4 h-4" />
-            {{ isOrganizerMode ? 'Fermer' : 'Déconnexion' }}
-          </button>
-        </div>
-      </div>
-    </header>
 
     <!-- Main Content -->
-    <main class="max-w-6xl mx-auto p-4">
+    <div class="max-w-6xl mx-auto">
+      <!-- Stat cards cliquables -->
+      <div v-if="!isOrganizerMode" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <button @click="onStatClick('total')"
+          class="stat-card text-left"
+          :class="activePanel === 'events' && statusFilter === 'all' ? 'ring-1 ring-blue-500' : ''">
+          <p class="text-2xl font-bold text-white">{{ adminSummary.total }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">Events total</p>
+          <p class="text-[10px] text-blue-400 mt-1">Voir tous →</p>
+        </button>
+        <button @click="onStatClick('pending')"
+          class="stat-card text-left"
+          :class="activePanel === 'events' && statusFilter === 'pending' ? 'ring-1 ring-yellow-500' : ''">
+          <p class="text-2xl font-bold text-yellow-400">{{ adminSummary.pending }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">En attente</p>
+          <p class="text-[10px] text-yellow-400 mt-1">Modérer →</p>
+        </button>
+        <button @click="onStatClick('approved')"
+          class="stat-card text-left"
+          :class="activePanel === 'events' && statusFilter === 'approved' ? 'ring-1 ring-green-500' : ''">
+          <p class="text-2xl font-bold text-green-400">{{ adminSummary.approved }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">Approuvés</p>
+          <p class="text-[10px] text-green-400 mt-1">Voir →</p>
+        </button>
+        <router-link to="/admin/users"
+          class="stat-card text-left block">
+          <p class="text-2xl font-bold text-purple-400">{{ allUsers.length || '—' }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">Utilisateurs</p>
+          <p class="text-[10px] text-purple-400 mt-1">Gérer →</p>
+        </router-link>
+        <router-link to="/admin/reports"
+          class="stat-card text-left block">
+          <p class="text-2xl font-bold text-orange-400">{{ reports.length || '—' }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">Signalements</p>
+          <p class="text-[10px] text-orange-400 mt-1">Traiter →</p>
+        </router-link>
+      </div>
+
+      <!-- Panel Users -->
+      <div v-if="activePanel === 'users' && !isOrganizerMode" class="mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white">Gestion utilisateurs</h2>
+          <button @click="loadUsers" class="text-xs text-slate-400 hover:text-white transition">Actualiser</button>
+        </div>
+        <div v-if="usersLoading" class="text-slate-500 text-sm py-6 text-center">Chargement...</div>
+        <div v-else class="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-slate-700/50 text-xs text-slate-400 uppercase tracking-wider">
+                <th class="px-4 py-2.5 text-left">Pseudo</th>
+                <th class="px-4 py-2.5 text-left">Téléphone</th>
+                <th class="px-4 py-2.5 text-left">Rôle</th>
+                <th class="px-4 py-2.5 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in allUsers" :key="u.id" class="border-b border-slate-700/30 hover:bg-slate-700/20 transition">
+                <td class="px-4 py-2.5 font-medium text-white truncate max-w-[120px]">{{ u.pseudo || u.name }}</td>
+                <td class="px-4 py-2.5 text-slate-400 text-xs">{{ u.phone }}</td>
+                <td class="px-4 py-2.5">
+                  <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="{
+                      'bg-purple-500/20 text-purple-300': u.role === 'admin',
+                      'bg-blue-500/20 text-blue-300': u.role === 'organizer',
+                      'bg-slate-600/40 text-slate-300': !u.role || u.role === 'consumer' || u.role === 'user'
+                    }">
+                    {{ u.role || 'consumer' }}
+                  </span>
+                </td>
+                <td class="px-4 py-2.5">
+                  <div class="flex gap-1 flex-wrap" v-if="userRoleUpdating !== u.id && userDeleting !== u.id">
+                    <button v-if="u.role !== 'organizer'" @click="setUserRole(u, 'organizer')"
+                      class="text-[10px] px-2 py-1 bg-blue-500/20 text-blue-300 hover:bg-blue-500/40 rounded transition">
+                      Organizer
+                    </button>
+                    <button v-if="u.role !== 'consumer' && u.role !== 'user'" @click="setUserRole(u, 'consumer')"
+                      class="text-[10px] px-2 py-1 bg-slate-600/40 text-slate-300 hover:bg-slate-600/60 rounded transition">
+                      Consumer
+                    </button>
+                    <button v-if="u.role !== 'admin'" @click="setUserRole(u, 'admin')"
+                      class="text-[10px] px-2 py-1 bg-purple-500/20 text-purple-300 hover:bg-purple-500/40 rounded transition">
+                      Admin
+                    </button>
+                    <button @click="removeUser(u)"
+                      class="text-[10px] px-2 py-1 bg-red-500/20 text-red-400 hover:bg-red-500/40 rounded transition ml-auto">
+                      Supprimer
+                    </button>
+                  </div>
+                  <span v-else class="text-[10px] text-slate-500">...</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button @click="activePanel = 'events'" class="mt-3 text-xs text-slate-500 hover:text-white transition">← Retour aux événements</button>
+      </div>
+
+      <!-- Panel Signalements -->
+      <div v-if="activePanel === 'reports' && !isOrganizerMode" class="mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-white">Signalements en attente</h2>
+          <button @click="loadReports" class="text-xs text-slate-400 hover:text-white transition">Actualiser</button>
+        </div>
+        <div v-if="reportsLoading" class="text-slate-500 text-sm py-6 text-center">Chargement...</div>
+        <div v-else-if="!reports.length" class="text-slate-500 text-sm py-8 text-center">Aucun signalement en attente</div>
+        <div v-else class="space-y-2">
+          <div v-for="r in reports" :key="r.id"
+            class="bg-slate-800/40 border border-orange-500/20 rounded-xl px-4 py-3 flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-white truncate">{{ r.events?.title || r.event_id }}</p>
+              <p class="text-xs text-slate-400 mt-0.5">Organisateur : {{ r.events?.organizer || '—' }}</p>
+              <p class="text-xs text-orange-300 mt-1 italic">"{{ r.reason }}"</p>
+              <p class="text-[10px] text-slate-600 mt-1">{{ r.reporter_phone }} — {{ new Date(r.created_at).toLocaleDateString('fr-FR') }}</p>
+            </div>
+            <div class="flex gap-1.5 flex-shrink-0">
+              <button @click="resolveReport(r)"
+                class="text-[10px] px-2.5 py-1.5 bg-red-500/20 text-red-400 hover:bg-red-500/40 rounded-lg transition font-medium">
+                Agir
+              </button>
+              <button @click="dismissReport(r)"
+                class="text-[10px] px-2.5 py-1.5 bg-slate-700 text-slate-400 hover:bg-slate-600 rounded-lg transition">
+                Ignorer
+              </button>
+            </div>
+          </div>
+        </div>
+        <button @click="activePanel = 'events'" class="mt-3 text-xs text-slate-500 hover:text-white transition">← Retour aux événements</button>
+      </div>
+
       <!-- Permission Banners -->
       <div v-if="micPermission === 'denied'" class="mb-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
         <MicOff class="w-5 h-5 flex-shrink-0" />
-        <span>🎤 Accès au microphone refusé. Autorisez le micro dans les paramètres du navigateur puis rechargez la page.</span>
+        <span> Accès au microphone refusé. Autorisez le micro dans les paramètres du navigateur puis rechargez la page.</span>
       </div>
       <div v-if="cameraPermission === 'denied'" class="mb-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
         <CameraOff class="w-5 h-5 flex-shrink-0" />
-        <span>📷 Accès à la caméra refusé. Autorisez la caméra dans les paramètres du navigateur puis rechargez la page.</span>
+        <span> Accès à la caméra refusé. Autorisez la caméra dans les paramètres du navigateur puis rechargez la page.</span>
       </div>
       <div v-if="geoPermission === 'denied'" class="mb-3 bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 p-3 rounded-xl text-sm flex items-center gap-2">
         <MapPin class="w-5 h-5 flex-shrink-0" />
-        <span>📍 Accès à la géolocalisation refusé. Autorisez la localisation dans les paramètres du navigateur puis rechargez la page.</span>
+        <span>Acces a la geolocalisation refuse. Autorisez la localisation dans les parametres du navigateur puis rechargez la page.</span>
       </div>
 
       <!-- Bandeau Quota Publications -->
@@ -1206,7 +1438,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
           </div>
           <div>
             <p class="text-sm font-bold" :class="hasReachedQuota ? 'text-red-400' : freePublicationsRemaining <= 2 ? 'text-yellow-400' : 'text-green-400'">
-              <span v-if="userStore.hasActivePass">♾️ Publications illimitées (Pass actif)</span>
+              <span v-if="userStore.hasActivePass">Publications illimitees (Pass actif)</span>
               <span v-else-if="hasReachedQuota">Quota atteint — {{ myPublicationsCount }}/{{ FREE_PUBLICATION_LIMIT }}</span>
               <span v-else>{{ freePublicationsRemaining }} publication(s) gratuite(s) restante(s)</span>
             </p>
@@ -1237,13 +1469,6 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             <Plus class="w-5 h-5" />
             Nouvel Événement
           </button>
-          <router-link 
-            to="/admin/ads" 
-            class="bg-yellow-400 text-black font-bold px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-yellow-500 transition"
-          >
-            <Megaphone class="w-5 h-5" />
-            Publicités
-          </router-link>
         </div>
       </div>
 
@@ -1269,6 +1494,26 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
           :class="statusFilter === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-gray-800 text-red-400 border-gray-700 hover:border-red-500/50'">
           <ShieldX class="w-3 h-3" /> Rejetés ({{ statusCounts.rejected }})
         </button>
+      </div>
+
+      <div v-if="!isOrganizerMode" class="grid sm:grid-cols-3 gap-3 mb-6">
+        <Combobox
+          v-model="organizerFilter"
+          :options="organizerOptions"
+          placeholder="Organisateur..."
+        />
+        <Combobox
+          v-model="locationFilter"
+          :options="locationOptions"
+          placeholder="Ville, quartier ou lieu..."
+        />
+        <Combobox
+          v-model="dateFilter"
+          :allow-free-text="false"
+          :clearable="false"
+          :options="dateFilterOptionsDashboard"
+          placeholder="Période..."
+        />
       </div>
 
       <!-- Events Grid -->
@@ -1338,6 +1583,13 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             
             <!-- Actions -->
             <div class="flex gap-2 mt-3">
+              <button
+                v-if="!isOrganizerMode"
+                @click="router.push(`/admin/events/${event.id}`)"
+                class="flex-1 bg-gray-800 text-white py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-gray-700 transition"
+              >
+                Details
+              </button>
               <button 
                 @click="openEditModal(event)"
                 class="flex-1 bg-gray-800 text-white py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-gray-700 transition"
@@ -1369,7 +1621,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
           Créer le premier événement
         </button>
       </div>
-    </main>
+    </div>
 
     <!-- Modale de Rejet -->
     <Teleport to="body">
@@ -1592,7 +1844,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             <!-- Recording Indicator -->
             <div v-if="isRecording" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm p-3 rounded-xl text-center flex items-center justify-center gap-2">
               <span class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
-              🎤 Parlez maintenant... (champ : {{ recordingField === 'title' ? 'Titre' : recordingField === 'description' ? 'Description' : recordingField === 'location' ? 'Lieu' : recordingField === 'organizer' ? 'Organisateur' : recordingField === 'musicTitle' ? 'Titre musique' : recordingField === 'customTag' ? 'Tag' : recordingField }})
+               Parlez maintenant... (champ : {{ recordingField === 'title' ? 'Titre' : recordingField === 'description' ? 'Description' : recordingField === 'location' ? 'Lieu' : recordingField === 'organizer' ? 'Organisateur' : recordingField === 'musicTitle' ? 'Titre musique' : recordingField === 'customTag' ? 'Tag' : recordingField }})
             </div>
 
             <!-- Type de média -->
@@ -1665,12 +1917,12 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
               </div>
               <!-- TikTok Preview -->
               <div v-if="form.mediaType === 'tiktok' && form.videoUrl && extractTikTokId(form.videoUrl)" class="mt-2 rounded-xl overflow-hidden border border-gray-700 bg-gray-900 p-3 text-center">
-                <p class="text-gray-400 text-xs mb-2">✅ TikTok ID détecté : {{ extractTikTokId(form.videoUrl) }}</p>
+                <p class="text-gray-400 text-xs mb-2">TikTok ID detecte : {{ extractTikTokId(form.videoUrl) }}</p>
                 <p class="text-gray-500 text-[10px]">La vidéo TikTok sera intégrée dans le feed</p>
               </div>
               <!-- Invalid URL warning -->
               <div v-if="form.videoUrl && !isVideoUrlValid" class="mt-1 text-red-400 text-xs">
-                ⚠️ URL invalide pour le type sélectionné.
+                URL invalide pour le type selectionne.
               </div>
             </div>
 
@@ -1920,7 +2172,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
               <textarea 
                 v-model="form.description" 
                 rows="3"
-                placeholder="Décrivez votre événement... ou cliquez sur 🎤 pour dicter"
+                placeholder="Décrivez votre événement... ou cliquez sur  pour dicter"
                 class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-primary focus:outline-none transition resize-none"
               ></textarea>
             </div>
@@ -1965,7 +2217,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                     ? 'bg-primary/20 text-primary border-primary/50' 
                     : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
                 >
-                  {{ form.features.includes(tag) ? '✓' : '+' }} {{ tag }}
+                  {{ form.features.includes(tag) ? '' : '+' }} {{ tag }}
                 </button>
               </div>
               <!-- Saisie libre de tag -->
@@ -2003,7 +2255,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                   :key="idx"
                   class="bg-primary/20 text-primary text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium"
                 >
-                  ✨ {{ feature }}
+                  {{ feature }}
                   <button 
                     type="button" 
                     @click="removeTag(idx)" 
@@ -2017,7 +2269,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
 
             <!-- Background Music (YouTube) -->
             <div>
-              <label class="block text-gray-400 text-sm mb-2">🎵 Musique de fond <span class="text-gray-600 text-xs">(URL YouTube ou YouTube Shorts)</span></label>
+              <label class="block text-gray-400 text-sm mb-2">Musique de fond <span class="text-gray-600 text-xs">(URL YouTube ou YouTube Shorts)</span></label>
               <input 
                 v-model="form.backgroundMusic" 
                 type="url" 
@@ -2035,7 +2287,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                 ></iframe>
               </div>
               <div v-if="form.backgroundMusic && !extractYouTubeId(form.backgroundMusic)" class="mt-1 text-red-400 text-xs">
-                ⚠️ URL YouTube invalide. Formats acceptés : youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/...
+                URL YouTube invalide. Formats acceptes : youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/...
               </div>
             </div>
 
@@ -2102,7 +2354,7 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
             <!-- Coordinates — Carte OSM Interactive (Accordéon) -->
             <div>
               <div class="flex items-center justify-between mb-2">
-                <label class="block text-gray-400 text-sm">📍 Localisation sur la carte</label>
+                <label class="block text-gray-400 text-sm">Localisation sur la carte</label>
                 <span v-if="form.coords.lat !== 5.30966 || form.coords.lng !== -3.97449" class="text-xs text-green-400 flex items-center gap-1">
                   <Navigation class="w-3 h-3" /> Géolocalisé
                 </span>
@@ -2121,13 +2373,13 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
                   </span>
                   <span v-else class="text-gray-500">Cliquer pour choisir sur la carte</span>
                 </div>
-                <span class="text-primary text-xs font-medium">{{ showMapPicker ? 'Fermer ✕' : 'Ouvrir la carte →' }}</span>
+                <span class="text-primary text-xs font-medium">{{ showMapPicker ? 'Fermer ' : 'Ouvrir la carte →' }}</span>
               </button>
               <!-- Map Accordion (inline) -->
               <div v-if="showMapPicker" class="mt-2 rounded-xl overflow-hidden border border-gray-700 relative z-0">
                 <div ref="mapPickerContainer" class="w-full h-64 z-0"></div>
                 <div class="p-2 bg-gray-900 flex items-center justify-between">
-                  <p class="text-gray-500 text-[10px]">📍 Cliquez sur la carte ou déplacez le marqueur</p>
+                  <p class="text-gray-500 text-[10px]">Cliquez sur la carte ou deplacez le marqueur</p>
                   <button type="button" @click="confirmMapPosition" class="bg-primary text-black font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-primary/90 transition text-xs">
                     <Check class="w-3 h-3" />
                     Valider
@@ -2151,3 +2403,18 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
 
   </div>
 </template>
+
+<style scoped>
+.stat-card {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.stat-card:hover {
+  background: rgba(51, 65, 85, 0.6);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+</style>

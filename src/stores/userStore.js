@@ -158,7 +158,7 @@ export const useUserStore = defineStore('user', () => {
                 })
             }
         } catch (error) {
-            console.error('❌ Erreur Supabase auth, fallback local:', error)
+            console.error(' Erreur Supabase auth, fallback local:', error)
         }
 
         // Fallback local si Supabase échoue
@@ -206,7 +206,7 @@ export const useUserStore = defineStore('user', () => {
         try {
             await supaUpdateUser(user.value.id, { following: user.value.following })
         } catch (error) {
-            console.error('❌ Erreur update following Supabase:', error)
+            console.error(' Erreur update following Supabase:', error)
             // Fallback local
             db.updateUser(user.value.id, { following: user.value.following })
         }
@@ -228,7 +228,7 @@ export const useUserStore = defineStore('user', () => {
             try {
                 updated = await supaUpdateUser(user.value.id, updates)
             } catch (error) {
-                console.error('❌ Erreur update profile Supabase:', error)
+                console.error(' Erreur update profile Supabase:', error)
                 updated = db.updateUser(user.value.id, updates)
             }
 
@@ -261,7 +261,7 @@ export const useUserStore = defineStore('user', () => {
             isLoading.value = false
             return true
         } catch (error) {
-            console.error('❌ Erreur devenir organisateur:', error)
+            console.error(' Erreur devenir organisateur:', error)
             isLoading.value = false
             return false
         }

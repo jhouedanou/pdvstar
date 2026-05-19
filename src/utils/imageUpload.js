@@ -7,6 +7,8 @@
  * - Compresse via Canvas API (JPEG quality 0.8) - supprime EXIF par effet de bord
  */
 
+import { supabase } from '../services/supabase'
+
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 const MAX_SIZE = 5 * 1024 * 1024 // 5 Mo
 const WARN_SIZE = 2 * 1024 * 1024 // 2 Mo
@@ -187,4 +189,54 @@ export async function processImage(file, options = {}) {
       error: 'Erreur lors de la compression de l\'image.'
     }
   }
+}
+
+/**
+ * Upload une dataURL (base64) ou File vers le bucket Supabase Storage.
+ * Retourne l'URL publique.
+ * @param {string|File} input - dataURL base64 ou File
+ * @param {string} folder - sous-dossier dans le bucket (ex: 'events', 'ads')
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export async function uploadToBucket(input, folder = 'misc') {
+    try {
+        let blob
+        let ext = 'jpg'
+        if (typeof input === 'string' && input.startsWith('data:')) {
+            const match = input.match(/^data:image\/(\w+);base64,(.+)$/)
+            if (!match) return { success: false, error: 'dataURL invalide' }
+            ext = match[1]
+            const bin = atob(match[2])
+            const arr = new Uint8Array(bin.length)
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+            blob = new Blob([arr], { type: `image/${ext}` })
+        } else if (input instanceof File) {
+            blob = input
+            ext = (input.name.split('.').pop() || 'jpg').toLowerCase()
+        } else {
+            return { success: false, error: 'Input non supporté' }
+        }
+        const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+        const { error: upErr } = await supabase.storage
+            .from('media')
+            .upload(path, blob, { upsert: true, contentType: blob.type })
+        if (upErr) return { success: false, error: upErr.message }
+        const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
+        return { success: true, url: publicUrl }
+    } catch (e) {
+        return { success: false, error: e.message }
+    }
+}
+
+/**
+ * Helper combo : compresse une image File + upload vers bucket.
+ * Si bucket fail, fallback sur le base64 compressé.
+ */
+export async function processAndUpload(file, folder = 'misc', options = {}) {
+    const compressed = await processImage(file, options)
+    if (!compressed.success) return compressed
+    const uploaded = await uploadToBucket(compressed.data, folder)
+    if (uploaded.success) return { success: true, data: uploaded.url, source: 'bucket' }
+    // fallback base64 si bucket indispo
+    return { success: true, data: compressed.data, source: 'base64', warning: 'Bucket indispo, image stockée en base64' }
 }

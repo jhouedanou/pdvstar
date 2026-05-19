@@ -26,6 +26,10 @@ function getConfig() {
     }
 }
 
+export function isPaymentConfigured() {
+    return Boolean(getConfig().token)
+}
+
 function headers() {
     const { token } = getConfig()
     if (!token) throw new Error('VITE_PAWAPAY_TOKEN manquant')
@@ -144,8 +148,8 @@ export async function waitForDepositFinal(depositId, { timeoutMs = 120000, inter
 }
 
 export const PAWAPAY_PROVIDERS_CI = [
-    { code: 'ORANGE_CI', name: 'Orange Money',  emoji: '🟠' },
-    { code: 'MTN_CI',    name: 'MTN MoMo',      emoji: '🟡' },
-    { code: 'MOOV_CI',   name: 'Moov Money',    emoji: '🔵' },
-    { code: 'WAVE_CI',   name: 'Wave',          emoji: '💧' }
+    { code: 'ORANGE_CI', name: 'Orange Money',  emoji: '' },
+    { code: 'MTN_CI',    name: 'MTN MoMo',      emoji: '' },
+    { code: 'MOOV_CI',   name: 'Moov Money',    emoji: '' },
+    { code: 'WAVE_CI',   name: 'Wave',          emoji: '' }
 ]

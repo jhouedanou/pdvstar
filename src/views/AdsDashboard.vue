@@ -1,18 +1,20 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAdminStore } from '../stores/adminStore'
 import { useUserStore } from '../stores/userStore'
-import { processImage } from '../utils/imageUpload'
-import { 
-    ArrowLeft, Plus, Edit, Trash2, X, Check, Camera, Save, 
+import { processImage, processAndUpload } from '../utils/imageUpload'
+import {
+    ArrowLeft, Plus, Edit, Trash2, X, Check, Camera, Save,
     ExternalLink, Eye, MousePointerClick, ToggleLeft, ToggleRight,
-    LogOut, Megaphone, Store
+    Megaphone, Store, ChevronUp, ChevronDown
 } from 'lucide-vue-next'
-import { fetchAds, createAd, updateAd, deleteAd } from '../services/supabase'
+import { fetchAds, createAd, updateAd, deleteAd, supabase } from '../services/supabase'
 
+const route = useRoute()
 const router = useRouter()
 const adminStore = useAdminStore()
+const insideAdminLayout = computed(() => route.path.startsWith('/admin'))
 const userStore = useUserStore()
 
 // Détection du mode : admin classique ou organisateur
@@ -67,6 +69,7 @@ const form = ref(defaultForm())
 
 onMounted(async () => {
     await loadAds()
+    await loadFilters()
 })
 
 const loadAds = async () => {
@@ -84,13 +87,19 @@ const handleImageChange = async (e) => {
     const file = e.target.files[0]
     if (!file) return
     imageError.value = ''
-    const result = await processImage(file)
-    if (!result.success) {
-        imageError.value = result.error
+    const compressed = await processImage(file)
+    if (!compressed.success) {
+        imageError.value = compressed.error
         return
     }
-    form.value.preview = result.data
-    form.value.image = result.data
+    form.value.preview = compressed.data
+    const uploaded = await processAndUpload(file, 'ads')
+    if (uploaded.success) {
+        form.value.image = uploaded.data
+    } else {
+        form.value.image = compressed.data
+        imageError.value = uploaded.error || 'Upload bucket KO, image en base64'
+    }
 }
 
 const openCreateModal = () => {
@@ -181,32 +190,80 @@ const toggleActive = async (ad) => {
 const totalClicks = computed(() => ads.value.reduce((s, a) => s + (a.clickCount || 0), 0))
 const totalViews = computed(() => ads.value.reduce((s, a) => s + (a.viewCount || 0), 0))
 const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
+
+// Quartiers et PDV depuis la base
+const quartiersDB = ref([])
+const pdvsDB = ref([])
+
+const loadFilters = async () => {
+    const { data: qData } = await supabase
+        .from('events')
+        .select('quartier')
+        .not('quartier', 'is', null)
+        .neq('quartier', '')
+    if (qData) {
+        const unique = [...new Set(qData.map(r => r.quartier))].sort()
+        quartiersDB.value = unique
+    }
+    const { data: pData } = await supabase
+        .from('ads')
+        .select('target_pdv')
+        .not('target_pdv', 'is', null)
+        .neq('target_pdv', '')
+    if (pData) {
+        const unique = [...new Set(pData.map(r => r.target_pdv))].sort()
+        pdvsDB.value = unique
+    }
+}
+
+// Reorder position
+const moveAd = async (index, dir) => {
+    const sorted = [...allAds.value].sort((a, b) => (a.position || 0) - (b.position || 0))
+    const targetIndex = index + dir
+    if (targetIndex < 0 || targetIndex >= sorted.length) return
+    const a = sorted[index]
+    const b = sorted[targetIndex]
+    const posA = a.position ?? index
+    const posB = b.position ?? targetIndex
+    await Promise.all([
+        updateAd(a.id, { position: posB }),
+        updateAd(b.id, { position: posA })
+    ])
+    a.position = posB
+    b.position = posA
+    allAds.value = [...allAds.value]
+}
 </script>
 
 <template>
-  <div class="min-h-screen bg-black">
-    <!-- Header -->
-    <header class="bg-surface border-b border-gray-800 px-4 py-3 sticky top-0 z-40">
+  <div :class="insideAdminLayout ? 'text-white' : 'min-h-screen bg-black text-white'">
+    <!-- Header standalone (hors AdminLayout) -->
+    <header v-if="!insideAdminLayout" class="bg-surface border-b border-gray-800 px-4 py-3 sticky top-0 z-40">
       <div class="max-w-6xl mx-auto flex justify-between items-center">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
           <Megaphone class="w-5 h-5 text-yellow-400" />
-          <h1 class="text-xl font-bold text-yellow-400">
+          <h1 class="text-lg font-bold text-yellow-400">
             {{ isOrganizerMode ? 'Mes Publicités' : 'Gestion des Publicités' }}
           </h1>
-          <p v-if="isOrganizerMode" class="text-xs text-gray-400 mt-0.5">
-            <Store class="w-3 h-3 inline" /> {{ userStore.user?.spaceName || userStore.user?.organizerName }}
-          </p>
         </div>
-        <div class="flex items-center gap-4">
-          <router-link :to="isOrganizerMode ? '/organizer' : '/admin/dashboard'" class="text-gray-400 text-sm hover:text-white transition flex items-center gap-1">
-            <ArrowLeft class="w-4 h-4" />
-            {{ isOrganizerMode ? 'Mon Espace' : 'Dashboard Admin' }}
-          </router-link>
-        </div>
+        <router-link :to="isOrganizerMode ? '/organizer' : '/admin/dashboard'" class="text-gray-400 text-sm hover:text-white flex items-center gap-1">
+          <ArrowLeft class="w-4 h-4" /> Retour
+        </router-link>
       </div>
     </header>
 
-    <main class="max-w-6xl mx-auto p-4">
+    <!-- Titre inline (dans AdminLayout) -->
+    <div v-else class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-xl font-bold text-slate-100">Publicités</h1>
+        <p class="text-slate-400 text-sm">{{ ads.length }} pub(s) — {{ activeAds }} actives</p>
+      </div>
+      <button @click="openCreateModal" class="bg-yellow-400 text-black font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 hover:bg-yellow-300 transition">
+        <Plus class="w-4 h-4" /> Nouvelle pub
+      </button>
+    </div>
+
+    <div :class="insideAdminLayout ? '' : 'max-w-6xl mx-auto p-4'">
       <!-- Stats Cards -->
       <div class="grid grid-cols-3 gap-4 mb-6">
         <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
@@ -288,36 +345,37 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
               <span class="bg-yellow-400/20 text-yellow-400 text-[10px] px-2 py-0.5 rounded-full">
                 CTA: {{ ad.ctaText || 'En savoir plus' }}
               </span>
-              <span class="bg-gray-800 text-gray-400 text-[10px] px-2 py-0.5 rounded-full">
-                Pos: {{ ad.position || 0 }}
+              <span class="bg-gray-700 text-white text-xs font-bold px-3 py-1 rounded-full border border-gray-600">
+                #{{ ad.position || 0 }}
               </span>
             </div>
 
             <!-- Actions -->
-            <div class="flex gap-2">
+            <div class="flex gap-1.5">
+              <div class="flex flex-col gap-0.5">
+                <button @click="moveAd(ads.indexOf(ad), -1)" class="p-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition">
+                  <ChevronUp class="w-3 h-3" />
+                </button>
+                <button @click="moveAd(ads.indexOf(ad), 1)" class="p-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition">
+                  <ChevronDown class="w-3 h-3" />
+                </button>
+              </div>
               <button @click="toggleActive(ad)" class="flex-1 py-2 rounded-lg flex items-center justify-center gap-1 text-sm font-medium transition"
                 :class="ad.isActive ? 'bg-gray-800 text-green-400 hover:bg-gray-700' : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'">
                 <ToggleRight v-if="ad.isActive" class="w-4 h-4" />
                 <ToggleLeft v-else class="w-4 h-4" />
-                {{ ad.isActive ? 'Désactiver' : 'Activer' }}
+                {{ ad.isActive ? 'Active' : 'Inactive' }}
               </button>
               <button @click="openEditModal(ad)" class="bg-gray-800 text-white px-3 py-2 rounded-lg hover:bg-gray-700 transition">
                 <Edit class="w-4 h-4" />
               </button>
-              <button 
-                v-if="deleteConfirmId !== ad.id"
-                @click="deleteConfirmId = ad.id" 
-                class="bg-red-500/20 text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/30 transition"
-              >
+              <button v-if="deleteConfirmId !== ad.id" @click="deleteConfirmId = ad.id"
+                class="bg-red-500/20 text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/30 transition">
                 <Trash2 class="w-4 h-4" />
               </button>
               <div v-else class="flex gap-1">
-                <button @click="handleDelete(ad.id)" class="bg-red-500 text-white px-3 py-2 rounded-lg">
-                  <Check class="w-4 h-4" />
-                </button>
-                <button @click="deleteConfirmId = null" class="bg-gray-700 text-white px-3 py-2 rounded-lg">
-                  <X class="w-4 h-4" />
-                </button>
+                <button @click="handleDelete(ad.id)" class="bg-red-500 text-white px-3 py-2 rounded-lg"><Check class="w-4 h-4" /></button>
+                <button @click="deleteConfirmId = null" class="bg-gray-700 text-white px-3 py-2 rounded-lg"><X class="w-4 h-4" /></button>
               </div>
             </div>
           </div>
@@ -333,7 +391,7 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
           Créer la première publicité
         </button>
       </div>
-    </main>
+    </div>
 
     <!-- Create/Edit Modal -->
     <Teleport to="body">
@@ -451,14 +509,26 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
             <!-- Phase 3: Ciblage -->
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-gray-400 text-sm mb-2">Quartier (cible)</label>
-                <input v-model="form.targetQuartier" type="text" placeholder="Cocody, Plateau…"
-                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none" />
+                <label class="block text-gray-400 text-sm mb-2">Quartier cible</label>
+                <select v-model="form.targetQuartier"
+                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none">
+                  <option value="">Tous quartiers</option>
+                  <option v-for="q in quartiersDB" :key="q" :value="q">{{ q }}</option>
+                </select>
+                <input v-if="!quartiersDB.length" v-model="form.targetQuartier" type="text"
+                  placeholder="Cocody, Plateau…"
+                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none mt-1 text-sm" />
               </div>
               <div>
-                <label class="block text-gray-400 text-sm mb-2">PDV (cible)</label>
-                <input v-model="form.targetPdv" type="text" placeholder="Code PDV"
-                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none" />
+                <label class="block text-gray-400 text-sm mb-2">PDV cible</label>
+                <select v-model="form.targetPdv"
+                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none">
+                  <option value="">Tous PDV</option>
+                  <option v-for="p in pdvsDB" :key="p" :value="p">{{ p }}</option>
+                </select>
+                <input v-if="!pdvsDB.length" v-model="form.targetPdv" type="text"
+                  placeholder="Code PDV ou lieu"
+                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none mt-1 text-sm" />
               </div>
             </div>
 
@@ -495,3 +565,4 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
     </Teleport>
   </div>
 </template>
+

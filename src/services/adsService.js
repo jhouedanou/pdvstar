@@ -59,7 +59,7 @@ export async function fetchAdsForUser({ quartier = null, pdv = null } = {}) {
     let q = supabase.from('ads').select('*').eq('is_active', true).order('position', { ascending: true })
     const { data, error } = await q
     if (error) {
-        console.error('❌ fetchAdsForUser:', error.message)
+        console.error(' fetchAdsForUser:', error.message)
         return []
     }
     // Filtrage targeting côté client (simple, peu de pubs)
@@ -72,7 +72,7 @@ export async function fetchAdsForUser({ quartier = null, pdv = null } = {}) {
 export async function createAdvert(adData) {
     const { data, error } = await supabase.from('ads').insert(toSupabaseAd(adData)).select().single()
     if (error) {
-        console.error('❌ createAdvert:', error.message)
+        console.error(' createAdvert:', error.message)
         return null
     }
     return fromSupabaseAd(data)
@@ -81,7 +81,7 @@ export async function createAdvert(adData) {
 export async function updateAdvert(id, updates) {
     const { data, error } = await supabase.from('ads').update(toSupabaseAd(updates)).eq('id', id).select().single()
     if (error) {
-        console.error('❌ updateAdvert:', error.message)
+        console.error(' updateAdvert:', error.message)
         return null
     }
     return fromSupabaseAd(data)
@@ -95,7 +95,7 @@ export async function trackAd({ adId, type = 'view', userId = null, quartier = n
     const { error } = await supabase.rpc('track_ad', {
         ad: adId, etype: type, uid: userId, q: quartier
     })
-    if (error) console.warn('⚠️ trackAd RPC échoué:', error.message)
+    if (error) console.warn('️ trackAd RPC échoué:', error.message)
 }
 
 export async function fetchAdvertiserStats(advertiserId) {
@@ -104,7 +104,7 @@ export async function fetchAdvertiserStats(advertiserId) {
         .select('id, title, view_count, click_count, is_active')
         .eq('advertiser_id', advertiserId)
     if (error) {
-        console.error('❌ fetchAdvertiserStats:', error.message)
+        console.error(' fetchAdvertiserStats:', error.message)
         return []
     }
     return data
