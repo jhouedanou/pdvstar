@@ -175,7 +175,8 @@ function fromSupabaseEvent(row) {
         viewCount: row.view_count || 0,
         clickCount: row.click_count || 0,
         approvedBy: row.approved_by || null,
-        approvedAt: row.approved_at || null
+        approvedAt: row.approved_at || null,
+        category: row.category || ''
     }
 }
 

@@ -7,9 +7,10 @@ import { processImage, processAndUpload } from '../utils/imageUpload'
 import {
     ArrowLeft, Plus, Edit, Trash2, X, Check, Camera, Save,
     ExternalLink, Eye, MousePointerClick, ToggleLeft, ToggleRight,
-    Megaphone, Store, ChevronUp, ChevronDown
+    Megaphone, Store, ChevronUp, ChevronDown, ShieldCheck, ShieldX, Clock, AlertTriangle
 } from 'lucide-vue-next'
 import { fetchAds, createAd, updateAd, deleteAd, supabase } from '../services/supabase'
+import { fetchAdsByOrganizer, fetchAllAds, approveAdvert, rejectAdvert, archiveAdvert } from '../services/adsService'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,19 +29,36 @@ const editingAd = ref(null)
 const deleteConfirmId = ref(null)
 const imageError = ref('')
 
-// Ads filtrées : admin voit tout, organisateur voit ses pubs
+// Filtre statut (admin uniquement)
+const statusFilter = ref('all')
+// Rejet : modale de motif
+const rejectingAdId = ref(null)
+const rejectionReason = ref('')
+
+// Statuts disponibles
+const AD_STATUSES = [
+    { key: 'all', label: 'Toutes' },
+    { key: 'pending', label: 'En attente' },
+    { key: 'approved', label: 'Approuvées' },
+    { key: 'rejected', label: 'Rejetées' },
+    { key: 'archived', label: 'Archivées' },
+]
+
+// Ads filtrées : admin voit tout (filtré par status), organisateur voit ses pubs
 const ads = computed(() => {
-    if (isAdmin.value) return allAds.value
-    // Organisateur : filtrer par sponsor (nom de l'organisateur) ou created_by (user ID)
-    const u = userStore.user
-    if (!u) return []
-    const names = [u.organizerName, u.spaceName, u.name].filter(Boolean).map(n => n.toLowerCase())
-    return allAds.value.filter(a => {
-        if (a.createdBy && u.id && a.createdBy === u.id) return true
-        const sponsor = (a.sponsor || '').toLowerCase()
-        return names.some(n => sponsor === n || sponsor.includes(n))
-    })
+    let list = allAds.value
+    if (!isAdmin.value) return list // déjà filtré par fetchAdsByOrganizer
+    if (statusFilter.value !== 'all') list = list.filter(a => a.status === statusFilter.value)
+    return list
 })
+
+const statusCountsAds = computed(() => ({
+    all: allAds.value.length,
+    pending: allAds.value.filter(a => a.status === 'pending').length,
+    approved: allAds.value.filter(a => a.status === 'approved').length,
+    rejected: allAds.value.filter(a => a.status === 'rejected').length,
+    archived: allAds.value.filter(a => a.status === 'archived').length,
+}))
 
 const defaultForm = () => ({
     title: '',
@@ -75,7 +93,16 @@ onMounted(async () => {
 const loadAds = async () => {
     isLoading.value = true
     try {
-        allAds.value = await fetchAds()
+        if (isAdmin.value) {
+            // Admin : toutes les pubs via fetchAllAds (avec status)
+            allAds.value = await fetchAllAds()
+        } else if (isOrganizerMode.value && userStore.user?.id) {
+            // Organisateur : uniquement ses pubs
+            allAds.value = await fetchAdsByOrganizer(userStore.user.id)
+        } else {
+            // Fallback
+            allAds.value = await fetchAds()
+        }
     } catch (e) {
         console.error('Erreur chargement ads:', e)
     } finally {
@@ -139,6 +166,8 @@ const closeModal = () => {
 }
 
 const handleSubmit = async () => {
+    // Statut : pending pour organisateur, approved pour admin
+    const newStatus = isAdmin.value ? 'approved' : 'pending'
     const adData = {
         title: form.value.title || 'Publicité',
         description: form.value.description || '',
@@ -146,14 +175,15 @@ const handleSubmit = async () => {
         link: form.value.link || '#',
         sponsor: form.value.sponsor || (userStore.user?.organizerName || userStore.user?.name || 'Sponsor'),
         ctaText: form.value.ctaText || 'En savoir plus',
-        isActive: form.value.isActive,
+        isActive: isAdmin.value ? form.value.isActive : false, // organisateur: inactif jusqu'à approbation
         position: form.value.position || 0,
         format: form.value.format || 'banner',
         targetQuartier: form.value.targetQuartier || null,
         targetPdv: form.value.targetPdv || null,
         videoUrl: form.value.videoUrl || null,
         createdBy: userStore.user?.id || null,
-        advertiserId: userStore.user?.id || null
+        advertiserId: userStore.user?.id || null,
+        status: editingAd.value ? editingAd.value.status : newStatus
     }
 
     if (editingAd.value) {
@@ -190,6 +220,45 @@ const toggleActive = async (ad) => {
 const totalClicks = computed(() => ads.value.reduce((s, a) => s + (a.clickCount || 0), 0))
 const totalViews = computed(() => ads.value.reduce((s, a) => s + (a.viewCount || 0), 0))
 const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
+const pendingCount = computed(() => allAds.value.filter(a => a.status === 'pending').length)
+
+/** Admin : approuver une pub */
+const handleApprove = async (ad) => {
+    const updated = await approveAdvert(ad.id, adminStore.adminUser?.id || 'admin')
+    if (updated) {
+        const idx = allAds.value.findIndex(a => a.id === ad.id)
+        if (idx !== -1) allAds.value[idx] = updated
+    }
+}
+
+/** Admin : ouvrir la modale de rejet */
+const openRejectModal = (ad) => {
+    rejectingAdId.value = ad.id
+    rejectionReason.value = ''
+}
+
+/** Admin : confirmer le rejet avec motif */
+const confirmReject = async () => {
+    if (!rejectionReason.value.trim()) return
+    const updated = await rejectAdvert(rejectingAdId.value, rejectionReason.value)
+    if (updated) {
+        const idx = allAds.value.findIndex(a => a.id === rejectingAdId.value)
+        if (idx !== -1) allAds.value[idx] = updated
+    }
+    rejectingAdId.value = null
+    rejectionReason.value = ''
+}
+
+/** Couleur et libellé du badge de statut */
+function statusBadge(status) {
+    switch (status) {
+        case 'approved': return { cls: 'bg-green-500/20 text-green-400 border border-green-500/30', label: 'Approuvée' }
+        case 'pending': return { cls: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30', label: 'En attente' }
+        case 'rejected': return { cls: 'bg-red-500/20 text-red-400 border border-red-500/30', label: 'Rejetée' }
+        case 'archived': return { cls: 'bg-gray-500/20 text-gray-400 border border-gray-500/30', label: 'Archivée' }
+        default: return { cls: 'bg-gray-700 text-gray-300', label: status || '-' }
+    }
+}
 
 // Quartiers et PDV depuis la base
 const quartiersDB = ref([])
@@ -275,14 +344,40 @@ const moveAd = async (index, dir) => {
           <p class="text-gray-500 text-xs mt-1">Actives</p>
         </div>
         <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
-          <p class="text-2xl font-bold text-primary">{{ totalClicks }}</p>
-          <p class="text-gray-500 text-xs mt-1">Clics total</p>
+          <p class="text-2xl font-bold text-yellow-400" :class="pendingCount > 0 ? 'animate-pulse' : ''">{{ isAdmin ? pendingCount : totalClicks }}</p>
+          <p class="text-gray-500 text-xs mt-1">{{ isAdmin ? 'En attente' : 'Clics total' }}</p>
         </div>
+      </div>
+
+      <!-- Info organisateur : pub en attente de validation -->
+      <div v-if="isOrganizerMode" class="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-start gap-3">
+        <Clock class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <p class="text-yellow-300 font-medium text-sm">Validation requise</p>
+          <p class="text-yellow-400/70 text-xs">Toute publicité créée ici sera soumise à l'admin pour approbation avant diffusion.</p>
+        </div>
+      </div>
+
+      <!-- Filtre statut (admin uniquement) -->
+      <div v-if="isAdmin" class="flex gap-2 flex-wrap mb-6">
+        <button
+          v-for="s in AD_STATUSES" :key="s.key"
+          @click="statusFilter = s.key"
+          :class="['px-3 py-1.5 rounded-full text-xs font-medium transition border',
+            statusFilter === s.key
+              ? 'bg-yellow-400 text-black border-yellow-400'
+              : 'bg-gray-800 text-gray-300 border-gray-700 hover:border-yellow-400/50']"
+        >
+          {{ s.label }}
+          <span class="ml-1 opacity-70">{{ statusCountsAds[s.key] }}</span>
+        </button>
       </div>
 
       <!-- Actions -->
       <div class="flex justify-between items-center mb-6">
-        <h2 class="text-xl font-bold text-white">Annonceurs / Sponsors</h2>
+        <h2 class="text-xl font-bold text-white">
+          {{ isOrganizerMode ? 'Mes publicités' : 'Annonceurs / Sponsors' }}
+        </h2>
         <button 
           @click="openCreateModal"
           class="bg-yellow-400 text-black font-bold px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-yellow-500 transition"
@@ -341,18 +436,39 @@ const moveAd = async (index, dir) => {
               </a>
             </div>
 
-            <div class="flex items-center gap-1.5 mb-3">
+            <!-- Badge statut + motif rejet -->
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+              <span :class="['text-[10px] font-bold px-2 py-0.5 rounded-full', statusBadge(ad.status).cls]">
+                {{ statusBadge(ad.status).label }}
+              </span>
               <span class="bg-yellow-400/20 text-yellow-400 text-[10px] px-2 py-0.5 rounded-full">
                 CTA: {{ ad.ctaText || 'En savoir plus' }}
               </span>
-              <span class="bg-gray-700 text-white text-xs font-bold px-3 py-1 rounded-full border border-gray-600">
+              <span v-if="isAdmin" class="bg-gray-700 text-white text-xs font-bold px-3 py-1 rounded-full border border-gray-600">
                 #{{ ad.position || 0 }}
               </span>
             </div>
 
-            <!-- Actions -->
+            <!-- Motif rejet (organisateur) -->
+            <div v-if="ad.status === 'rejected' && ad.rejectionReason" class="mb-3 p-2 bg-red-500/10 rounded-lg border border-red-500/20">
+              <p class="text-red-400 text-xs"><span class="font-bold">Motif :</span> {{ ad.rejectionReason }}</p>
+            </div>
+
+            <!-- Boutons approbation / rejet admin (uniquement en attente) -->
+            <div v-if="isAdmin && ad.status === 'pending'" class="flex gap-2 mb-3">
+              <button @click="handleApprove(ad)"
+                class="flex-1 py-2 rounded-lg bg-green-500/20 text-green-400 text-sm font-bold flex items-center justify-center gap-1 hover:bg-green-500/30 transition border border-green-500/30">
+                <ShieldCheck class="w-4 h-4" /> Approuver
+              </button>
+              <button @click="openRejectModal(ad)"
+                class="flex-1 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm font-bold flex items-center justify-center gap-1 hover:bg-red-500/30 transition border border-red-500/30">
+                <ShieldX class="w-4 h-4" /> Rejeter
+              </button>
+            </div>
+
+            <!-- Actions classiques -->
             <div class="flex gap-1.5">
-              <div class="flex flex-col gap-0.5">
+              <div v-if="isAdmin" class="flex flex-col gap-0.5">
                 <button @click="moveAd(ads.indexOf(ad), -1)" class="p-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition">
                   <ChevronUp class="w-3 h-3" />
                 </button>
@@ -360,7 +476,7 @@ const moveAd = async (index, dir) => {
                   <ChevronDown class="w-3 h-3" />
                 </button>
               </div>
-              <button @click="toggleActive(ad)" class="flex-1 py-2 rounded-lg flex items-center justify-center gap-1 text-sm font-medium transition"
+              <button v-if="isAdmin || ad.status === 'approved'" @click="toggleActive(ad)" class="flex-1 py-2 rounded-lg flex items-center justify-center gap-1 text-sm font-medium transition"
                 :class="ad.isActive ? 'bg-gray-800 text-green-400 hover:bg-gray-700' : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'">
                 <ToggleRight v-if="ad.isActive" class="w-4 h-4" />
                 <ToggleLeft v-else class="w-4 h-4" />
@@ -392,6 +508,34 @@ const moveAd = async (index, dir) => {
         </button>
       </div>
     </div>
+
+    <!-- Modale de rejet avec motif (admin) -->
+    <Teleport to="body">
+      <div v-if="rejectingAdId" class="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4" @click.self="rejectingAdId = null">
+        <div class="bg-surface rounded-2xl w-full max-w-md p-6">
+          <div class="flex items-center gap-3 mb-4">
+            <ShieldX class="w-6 h-6 text-red-400" />
+            <h3 class="text-lg font-bold text-white">Rejeter la publicité</h3>
+          </div>
+          <p class="text-gray-400 text-sm mb-4">Indiquez le motif de rejet visible par l'organisateur :</p>
+          <textarea
+            v-model="rejectionReason"
+            rows="3"
+            placeholder="Ex: Image non conforme, contenu inapproprié, budget insuffisant..."
+            class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-red-400 focus:outline-none transition resize-none text-sm mb-4"
+          ></textarea>
+          <div class="flex gap-3">
+            <button @click="rejectingAdId = null" class="flex-1 py-3 rounded-xl bg-gray-800 text-gray-300 font-bold hover:bg-gray-700 transition">
+              Annuler
+            </button>
+            <button @click="confirmReject" :disabled="!rejectionReason.trim()"
+              class="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold hover:bg-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+              Confirmer le rejet
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Create/Edit Modal -->
     <Teleport to="body">

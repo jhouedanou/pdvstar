@@ -246,7 +246,7 @@ export const useUserStore = defineStore('user', () => {
     }
 
     const isOrganizer = computed(() => {
-        return user.value && (user.value.role === 'organizer' || user.value.role === 'admin')
+        return user.value && user.value.role === 'organizer'
     })
 
     const becomeOrganizer = async (organizerData) => {

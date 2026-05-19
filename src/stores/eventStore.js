@@ -20,13 +20,14 @@ export const useEventStore = defineStore('events', () => {
     const deriveCategory = (event) => {
         const text = `${event.title || ''} ${(event.features || []).join(' ')}`.toLowerCase()
         if (/\bbrunch\b/.test(text)) return 'brunch'
-        if (/\bdj\b|\bclub\b|\bélectro\b|\belectro\b/.test(text)) return 'dj'
+        if (/\bdj\b|\bclub\b|\b[eé]lectro\b|\btechno\b|\bhouse music\b/.test(text)) return 'dj'
         if (/\bfestival\b/.test(text)) return 'festival'
-        if (/\bsport\b|\bfoot\b|\bbasket\b|\bmatch\b|\btournoi\b/.test(text)) return 'sport'
-        if (/\bart\b|\bexpo\b|\bculture\b|\bgalleri/.test(text)) return 'art'
-        if (/\bcomédie\b|\bhumour\b|\bstand[\s-]?up\b|\bkaraok/.test(text)) return 'comedie'
-        if (/\bafterwork\b/.test(text)) return 'afterwork'
-        if (/\bconcert\b|\blive\b|\bzouglou\b|\brap\b|\bgospel\b|\bafrobeat\b|\bmusique\b|\bcoupé/.test(text)) return 'musique'
+        if (/\bsport\b|\bfoot(ball)?\b|\bbasket\b|\bmatch\b|\btournoi\b|\bcomp[eé]tition\b/.test(text)) return 'sport'
+        if (/\bart\b|\bexpo(sition)?\b|\bculture\b|\bgalerie\b|\bth[eé][aâ]tre\b|\bvernissage\b/.test(text)) return 'art'
+        if (/\bcom[eé]die\b|\bhumour\b|\bstand[\s-]?up\b|\bkaraoké?\b/.test(text)) return 'comedie'
+        if (/\bafterwork\b|\bafter work\b/.test(text)) return 'afterwork'
+        if (/\bconcert\b|\blive\b|\bzouglou\b|\brap\b|\bgospel\b|\bafrobeat\b|\bmusique\b|\bcoup[eé][\s-]d[eé]cal[eé]\b|\breggae\b|\bjazz\b|\br[n&]b\b/.test(text)) return 'musique'
+        if (/\bsoir[eé]e\b|\bparty\b|\bnuit\b|\bbo[iî]te\b|\bnightlife\b|\bgala\b/.test(text)) return 'soiree'
         return ''
     }
 
@@ -41,63 +42,47 @@ export const useEventStore = defineStore('events', () => {
         })
     }
 
+    // Déduplication par id (évite les doublons si re-seed ou double fetch)
+    const dedup = (list) => {
+        const seen = new Set()
+        return list.filter(e => {
+            if (seen.has(e.id)) return false
+            seen.add(e.id)
+            return true
+        })
+    }
+
     /**
      * Charger les événements depuis Supabase.
      * Si la table est vide, on seed avec les données locales.
      * Fallback sur les données locales en cas d'erreur réseau.
      */
     const loadEvents = async () => {
+        if (isLoading.value) return   // verrou anti-appel concurrent
         isLoading.value = true
         try {
             const supaEvents = await supaFetchEvents()
             
             if (supaEvents.length > 0) {
-                events.value = enrichWithCategories(supaEvents)
-
-                // Vérifier si TOUS les events seed sont périmés (dates passées)
-                // Si oui, re-seeder avec des dates fraîches (uniquement les events sans created_by)
-                const now = new Date()
-                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-                const seedEvents = supaEvents.filter(e => !e.createdBy)
-                const hasFutureSeeds = seedEvents.some(e => e.date && new Date(e.date) >= today)
-                
-                if (seedEvents.length > 0 && !hasFutureSeeds) {
-                    console.log(' Events seed périmés, re-seed avec dates fraîches...')
-                    // Supprimer les anciens seeds et insérer de nouveaux
-                    for (const e of seedEvents) {
-                        await supaDeleteEvent(e.id)
-                    }
-                    const localEvents = db.getEvents()
-                    // Forcer la régénération des dates
-                    db.seedEvents()
-                    const freshLocalEvents = db.getEvents()
-                    const seeded = await supaSeedEvents(freshLocalEvents)
-                    if (seeded.length > 0) {
-                        // Garder les events créés par les utilisateurs + les nouveaux seeds
-                        const userEvents = supaEvents.filter(e => e.createdBy)
-                        events.value = enrichWithCategories([...userEvents, ...seeded])
-                        console.log(` ${seeded.length} events re-seedés avec dates fraîches`)
-                    }
-                }
+                events.value = dedup(enrichWithCategories(supaEvents))
             } else {
                 // Table vide → seed avec les données locales
                 console.log(' Table Supabase vide, insertion des données seed...')
-                db.seedEvents() // Forcer la régénération
+                db.seedEvents()
                 const localEvents = db.getEvents()
                 const seeded = await supaSeedEvents(localEvents)
                 if (seeded.length > 0) {
-                    events.value = enrichWithCategories(seeded)
+                    events.value = dedup(enrichWithCategories(seeded))
                     console.log(` ${seeded.length} événements insérés dans Supabase`)
                 } else {
-                    // Fallback local si le seed échoue
                     console.warn('️ Seed Supabase échoué, utilisation des données locales')
-                    events.value = localEvents
+                    events.value = dedup(localEvents)
                 }
             }
         } catch (error) {
             console.error(' Erreur chargement Supabase, fallback local:', error)
-            db.seedEvents() // Régénérer avec dates fraîches
-            events.value = db.getEvents()
+            db.seedEvents()
+            events.value = dedup(db.getEvents())
         } finally {
             isLoading.value = false
             isInitialized.value = true

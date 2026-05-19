@@ -4,7 +4,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX, Map as MapIcon } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX, Map as MapIcon, SlidersHorizontal, RotateCcw } from 'lucide-vue-next'
 import { reportEvent } from '../services/supabase'
 import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
@@ -99,16 +99,34 @@ const feedPriceOptions = [
 ]
 
 const FEED_CATEGORIES = [
-    { v: 'musique', l: '\u{1F3B5} Musique' },
-    { v: 'dj', l: '\u{1F3A7} DJ' },
-    { v: 'brunch', l: '\u{1F942} Brunch' },
-    { v: 'sport', l: '\u26BD Sport' },
-    { v: 'art', l: '\u{1F3A8} Art' },
-    { v: 'comedie', l: '\u{1F602} Comédie' },
-    { v: 'afterwork', l: '\u{1F379} Afterwork' },
-    { v: 'festival', l: '\u{1F3AA} Festival' },
+    { v: 'soiree', l: '🌙 Soirée' },
+    { v: 'musique', l: '🎵 Musique' },
+    { v: 'dj', l: '🎧 DJ' },
+    { v: 'festival', l: '🎪 Festival' },
+    { v: 'brunch', l: '🥂 Brunch' },
+    { v: 'afterwork', l: '🍹 Afterwork' },
+    { v: 'sport', l: '⚽ Sport' },
+    { v: 'art', l: '🎨 Art' },
+    { v: 'comedie', l: '😂 Comédie' },
 ]
 const feedCategoryFilter = ref('all')
+
+// Drawer de filtres
+const showFilterDrawer = ref(false)
+const activeFilterCount = computed(() => {
+    let n = 0
+    if (feedDateFilter.value !== 'all') n++
+    if (feedPriceFilter.value !== 'all') n++
+    if (feedNearMeOnly.value) n++
+    if (feedCategoryFilter.value !== 'all') n++
+    return n
+})
+const resetAllFilters = () => {
+    feedDateFilter.value = 'all'
+    feedPriceFilter.value = 'all'
+    feedNearMeOnly.value = false
+    feedCategoryFilter.value = 'all'
+}
 
 // Splash screen : simule la première interaction pour débloquer l'autoplay audio
 const hasInteracted = ref(false)
@@ -1523,58 +1541,151 @@ const handleDeleteEvent = async (eventId) => {
        </div>
     </div>
 
-    <div class="absolute top-24 left-0 right-0 z-20 px-3 pointer-events-auto">
-      <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-        <button
-          v-for="opt in feedDateOptions"
-          :key="opt.v"
-          @click="feedDateFilter = opt.v"
-          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
-          :class="feedDateFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
-        >
-          {{ opt.l }}
-        </button>
-        <button
-          @click="feedNearMeOnly = !feedNearMeOnly"
-          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition flex items-center gap-1"
-          :class="feedNearMeOnly ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
-          :title="feedNearMeOnly && !userHasCoords ? 'Activer la géolocalisation' : ''"
-        >
-          <MapPin class="w-3 h-3" />
-          Proche
-          <span v-if="feedNearMeOnly && !userHasCoords" class="text-[8px] opacity-70">(!)</span>
-        </button>
-        <button
-          v-for="opt in feedPriceOptions"
-          :key="opt.v"
-          @click="feedPriceFilter = feedPriceFilter === opt.v ? 'all' : opt.v"
-          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
-          :class="feedPriceFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
-        >
-          {{ opt.l }}
-        </button>
-        <!-- Reset tous filtres -->
-        <button
-          v-if="feedDateFilter !== 'all' || feedPriceFilter !== 'all' || feedNearMeOnly || feedCategoryFilter !== 'all'"
-          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false; feedCategoryFilter = 'all'"
-          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition bg-red-500/20 text-red-400 border-red-500/30"
-        >
-          Réinitialiser
-        </button>
-      </div>
-      <!-- Rangée 2 : Filtre catégories -->
-      <div class="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 mt-1.5" style="touch-action: pan-x; -webkit-overflow-scrolling: touch;">
-        <button
-          v-for="cat in FEED_CATEGORIES"
-          :key="cat.v"
-          @click="feedCategoryFilter = feedCategoryFilter === cat.v ? 'all' : cat.v"
-          class="whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-bold border backdrop-blur-md transition"
-          :class="feedCategoryFilter === cat.v ? 'bg-primary text-black border-primary' : 'bg-black/30 text-white/70 border-white/10'"
-        >
-          {{ cat.l }}
-        </button>
-      </div>
+    <!-- Bouton FAB Filtres -->
+    <div class="absolute top-24 right-3 z-20 pointer-events-auto">
+      <button
+        @click="showFilterDrawer = true"
+        class="relative flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/15 text-white font-bold px-3 py-2 rounded-full text-xs transition active:scale-95 shadow-lg"
+      >
+        <SlidersHorizontal class="w-3.5 h-3.5" />
+        Filtres
+        <span
+          v-if="activeFilterCount > 0"
+          class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-primary text-black text-[9px] font-black rounded-full flex items-center justify-center"
+        >{{ activeFilterCount }}</span>
+      </button>
     </div>
+
+    <!-- Drawer filtres -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-300 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition duration-200 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="showFilterDrawer"
+          class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90]"
+          @click.self="showFilterDrawer = false"
+        />
+      </Transition>
+      <Transition
+        enter-active-class="transition duration-300 ease-out"
+        enter-from-class="translate-y-full"
+        enter-to-class="translate-y-0"
+        leave-active-class="transition duration-200 ease-in"
+        leave-from-class="translate-y-0"
+        leave-to-class="translate-y-full"
+      >
+        <div
+          v-if="showFilterDrawer"
+          class="fixed bottom-0 left-0 right-0 z-[91] bg-gray-950 rounded-t-3xl border-t border-white/10 pb-safe"
+          style="max-height: 85vh; overflow-y: auto;"
+        >
+          <!-- Handle + titre -->
+          <div class="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/8">
+            <div class="flex items-center gap-2">
+              <SlidersHorizontal class="w-4 h-4 text-primary" />
+              <h3 class="text-white font-bold text-base">Filtrer le flux</h3>
+              <span v-if="activeFilterCount > 0" class="bg-primary text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">{{ activeFilterCount }}</span>
+            </div>
+            <button @click="showFilterDrawer = false" class="text-gray-400 hover:text-white transition">
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <div class="px-5 py-4 space-y-6">
+            <!-- Quand ? -->
+            <div>
+              <p class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-3">📅 Quand ?</p>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="opt in feedDateOptions"
+                  :key="opt.v"
+                  @click="feedDateFilter = opt.v"
+                  class="px-4 py-2 rounded-xl text-sm font-bold border transition active:scale-95"
+                  :class="feedDateFilter === opt.v
+                    ? 'bg-primary text-black border-primary'
+                    : 'bg-white/5 text-white/80 border-white/10 hover:border-white/30'"
+                >
+                  {{ opt.l }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Prix -->
+            <div>
+              <p class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-3">💰 Prix</p>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  @click="feedPriceFilter = feedPriceFilter === 'free' ? 'all' : 'free'"
+                  class="px-4 py-2 rounded-xl text-sm font-bold border transition active:scale-95"
+                  :class="feedPriceFilter === 'free'
+                    ? 'bg-primary text-black border-primary'
+                    : 'bg-white/5 text-white/80 border-white/10 hover:border-white/30'"
+                >🆓 Gratuit</button>
+                <button
+                  @click="feedPriceFilter = feedPriceFilter === 'paid' ? 'all' : 'paid'"
+                  class="px-4 py-2 rounded-xl text-sm font-bold border transition active:scale-95"
+                  :class="feedPriceFilter === 'paid'
+                    ? 'bg-primary text-black border-primary'
+                    : 'bg-white/5 text-white/80 border-white/10 hover:border-white/30'"
+                >💎 Payant</button>
+                <button
+                  @click="feedNearMeOnly = !feedNearMeOnly"
+                  class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border transition active:scale-95"
+                  :class="feedNearMeOnly
+                    ? 'bg-primary text-black border-primary'
+                    : 'bg-white/5 text-white/80 border-white/10 hover:border-white/30'"
+                >
+                  <MapPin class="w-3.5 h-3.5" />
+                  Près de moi
+                  <span v-if="feedNearMeOnly && !userHasCoords" class="text-[9px] opacity-70">(GPS off)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Catégorie -->
+            <div>
+              <p class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-3">🎭 Catégorie</p>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="cat in FEED_CATEGORIES"
+                  :key="cat.v"
+                  @click="feedCategoryFilter = feedCategoryFilter === cat.v ? 'all' : cat.v"
+                  class="px-4 py-2 rounded-xl text-sm font-bold border transition active:scale-95"
+                  :class="feedCategoryFilter === cat.v
+                    ? 'bg-primary text-black border-primary'
+                    : 'bg-white/5 text-white/80 border-white/10 hover:border-white/30'"
+                >
+                  {{ cat.l }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="px-5 pb-6 pt-2 flex gap-3 border-t border-white/8">
+            <button
+              @click="resetAllFilters"
+              class="flex items-center gap-1.5 px-4 py-3 rounded-xl border border-white/15 text-gray-400 text-sm font-bold hover:text-white hover:border-white/30 transition active:scale-95"
+            >
+              <RotateCcw class="w-4 h-4" /> Réinitialiser
+            </button>
+            <button
+              @click="showFilterDrawer = false"
+              class="flex-1 py-3 rounded-xl bg-primary text-black font-black text-sm transition active:scale-90"
+            >
+              Voir les résultats
+              <span v-if="activeFilterCount > 0" class="ml-1 opacity-70">({{ activeFilterCount }} actif{{ activeFilterCount > 1 ? 's' : '' }})</span>
+            </button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- MAIN FEED VIEW -->
     <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll no-scrollbar">
@@ -1585,7 +1696,7 @@ const handleDeleteEvent = async (eventId) => {
         <p class="text-gray-400 font-bold text-lg">Aucun événement</p>
         <p class="text-gray-600 text-sm">Aucun résultat pour ce filtre.</p>
         <button
-          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false; feedCategoryFilter = 'all'"
+          @click="resetAllFilters"
           class="bg-primary text-black font-bold px-6 py-2.5 rounded-full text-sm mt-2"
         >
           Voir tous les événements
@@ -2207,7 +2318,7 @@ const handleDeleteEvent = async (eventId) => {
 
                      <!-- Quick Actions -->
                      <div class="border-t border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2">
-                       <!-- Espace Admin (visible si session admin uniquement) -->
+                       <!-- Espace Admin : session admin locale uniquement, jamais pour user normal -->
                        <button
                          v-if="adminStore.isAuthenticated"
                          @click="router.push('/admin/dashboard')"
@@ -2217,7 +2328,7 @@ const handleDeleteEvent = async (eventId) => {
                          Espace Admin
                        </button>
 
-                       <!-- Espace Organisateur -->
+                       <!-- Espace Organisateur : uniquement si role === 'organizer' -->
                        <button
                          v-if="userStore.isOrganizer"
                          @click="router.push('/pro')"
@@ -2225,14 +2336,6 @@ const handleDeleteEvent = async (eventId) => {
                        >
                          <Store class="w-5 h-5" />
                          Espace Organisateur
-                       </button>
-                       <button
-                         v-else
-                         @click="router.push('/pro')"
-                         class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
-                       >
-                         <Store class="w-4 h-4" />
-                         Devenir Organisateur
                        </button>
 
                        <!-- Sous-actions organizer -->
