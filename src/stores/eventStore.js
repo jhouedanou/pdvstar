@@ -16,6 +16,31 @@ export const useEventStore = defineStore('events', () => {
     const isLoading = ref(false)
     const isInitialized = ref(false)
 
+    // Dériver une catégorie depuis le titre/features si absente
+    const deriveCategory = (event) => {
+        const text = `${event.title || ''} ${(event.features || []).join(' ')}`.toLowerCase()
+        if (/\bbrunch\b/.test(text)) return 'brunch'
+        if (/\bdj\b|\bclub\b|\bélectro\b|\belectro\b/.test(text)) return 'dj'
+        if (/\bfestival\b/.test(text)) return 'festival'
+        if (/\bsport\b|\bfoot\b|\bbasket\b|\bmatch\b|\btournoi\b/.test(text)) return 'sport'
+        if (/\bart\b|\bexpo\b|\bculture\b|\bgalleri/.test(text)) return 'art'
+        if (/\bcomédie\b|\bhumour\b|\bstand[\s-]?up\b|\bkaraok/.test(text)) return 'comedie'
+        if (/\bafterwork\b/.test(text)) return 'afterwork'
+        if (/\bconcert\b|\blive\b|\bzouglou\b|\brap\b|\bgospel\b|\bafrobeat\b|\bmusique\b|\bcoupé/.test(text)) return 'musique'
+        return ''
+    }
+
+    // Enrichir les events avec category (depuis local db ou heuristique)
+    const enrichWithCategories = (eventList) => {
+        const localMap = new Map(db.events.value.map(e => [e.id, e]))
+        return eventList.map(e => {
+            if (e.category) return e
+            const local = localMap.get(e.id)
+            if (local?.category) return { ...e, category: local.category }
+            return { ...e, category: deriveCategory(e) }
+        })
+    }
+
     /**
      * Charger les événements depuis Supabase.
      * Si la table est vide, on seed avec les données locales.
@@ -27,7 +52,7 @@ export const useEventStore = defineStore('events', () => {
             const supaEvents = await supaFetchEvents()
             
             if (supaEvents.length > 0) {
-                events.value = supaEvents
+                events.value = enrichWithCategories(supaEvents)
 
                 // Vérifier si TOUS les events seed sont périmés (dates passées)
                 // Si oui, re-seeder avec des dates fraîches (uniquement les events sans created_by)
@@ -50,7 +75,7 @@ export const useEventStore = defineStore('events', () => {
                     if (seeded.length > 0) {
                         // Garder les events créés par les utilisateurs + les nouveaux seeds
                         const userEvents = supaEvents.filter(e => e.createdBy)
-                        events.value = [...userEvents, ...seeded]
+                        events.value = enrichWithCategories([...userEvents, ...seeded])
                         console.log(` ${seeded.length} events re-seedés avec dates fraîches`)
                     }
                 }
@@ -61,7 +86,7 @@ export const useEventStore = defineStore('events', () => {
                 const localEvents = db.getEvents()
                 const seeded = await supaSeedEvents(localEvents)
                 if (seeded.length > 0) {
-                    events.value = seeded
+                    events.value = enrichWithCategories(seeded)
                     console.log(` ${seeded.length} événements insérés dans Supabase`)
                 } else {
                     // Fallback local si le seed échoue

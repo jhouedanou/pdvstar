@@ -7,14 +7,15 @@ class MockDB {
         this.users = useStorage('pdvstar_db_users', [])
         this.events = useStorage('pdvstar_db_events', [])
 
-        // Initialize with seed data if empty or invalid or missing coords
+        // Initialize with seed data if empty or invalid or missing coords/category
         const needsReset = this.events.value.length === 0 || 
                           !this.events.value[0]?.coords || 
                           !this.events.value[0]?.image ||
-                          this.events.value.filter(e => e.coords).length < 15 // If less than 15 events have coords
+                          this.events.value.filter(e => e.coords).length < 15 ||
+                          !this.events.value[0]?.category // Reset if category field is missing
         
         if (needsReset) {
-            console.log(' Reinitializing events with coordinates...')
+            console.log(' Reinitializing events with coordinates and categories...')
             this.seedEvents()
         }
     }
@@ -104,68 +105,196 @@ class MockDB {
     }
 
     seedEvents() {
-        // Realistic Abidjan Data
-        const organizers = ['Babi Event', 'Life Magazine', 'Pulse CI', 'Vibe Radio', 'Abidjan.net', 'Club 225', 'Yopougon Enjaillement']
-        const zones = [
-            { name: 'Marcory Zone 4', lat: 5.297, lng: -3.974 },
-            { name: 'Cocody Vallons', lat: 5.352, lng: -3.998 },
-            { name: 'Plateau', lat: 5.324, lng: -4.020 },
-            { name: 'Yopougon Niangon', lat: 5.341, lng: -4.076 },
-            { name: 'Biétry', lat: 5.286, lng: -3.982 },
-            { name: 'Mille Maquis', lat: 5.309, lng: -3.950 },
-            { name: 'Riviera Golf', lat: 5.334, lng: -3.970 },
-            { name: 'Treichville', lat: 5.299, lng: -4.009 }
-        ]
-
-        const templates = [
-            { title: "Soirée Coupé Décalé", desc: "Les meilleurs sons d'Abidjan pour danser jusqu'au matin !" },
-            { title: "Afterwork Chill", desc: "Détente après le boulot avec cocktails et tapas." },
-            { title: "Concert Live Zouglou", desc: "Wôyo authentique, ambiance garantie." },
-            { title: "Brunch du Dimanche", desc: "Buffet à volonté et piscine pour bien finir la semaine." },
-            { title: "Showcase Rap Ivoire", desc: "Les nouvelles pépites du rap ivoirien en live." },
-            { title: "Karaoké Night", desc: "Venez chanter vos titres préférés entre amis." },
-            { title: "Soirée Retro", desc: "Les classiques des années 90 et 2000." },
-            { title: "Festival Grillades", desc: "Choukouya, poisson braisé et poulet piqué." }
-        ]
-
-        const events = []
         const today = new Date()
-
-        for (let i = 0; i < 20; i++) {
-            const zone = zones[i % zones.length]
-            const tmpl = templates[i % templates.length]
-            // Random offset for location to avoid perfect overlap
-            const lat = zone.lat + (Math.random() * 0.01 - 0.005)
-            const lng = zone.lng + (Math.random() * 0.01 - 0.005)
-
-            // Random date (Upcoming 2 weeks)
-            const daysOffset = Math.floor(Math.random() * 14)
-            const date = new Date(today.getTime() + (daysOffset * 86400000))
-            // Random evenish hour
-            date.setHours(18 + Math.floor(Math.random() * 6), 0)
-
-            // Determine if event is premium (20% chance)
-            const isPremium = Math.random() < 0.2
-
-            events.push({
-                id: `evt-${i + 1}`,
-                type: 'image',
-                title: `${tmpl.title} @ ${zone.name}`,
-                date: date.toISOString(),
-                organizer: organizers[Math.floor(Math.random() * organizers.length)],
-                location: zone.name,
-                coords: { lat, lng },
-                // Calc fake distance based on Marcory center for initial display
-                distance: `${(Math.sqrt(Math.pow(lat - 5.309, 2) + Math.pow(lng + 3.974, 2)) * 111).toFixed(1)} km`,
-                description: tmpl.desc,
-                image: this.getPlaceholderImage(i),
-                participantCount: Math.floor(Math.random() * 500) + 20,
-                isRegistered: false,
-                isPremium: isPremium,
-                price: isPremium ? Math.floor(Math.random() * 15000) + 5000 : 0, // 5000-20000 CFA for premium
-                features: isPremium ? ['VIP Access', 'Free Drink', 'Photo Booth'] : []
-            })
+        const d = (offsetDays, hour = 20, min = 0) => {
+            const dt = new Date(today)
+            dt.setDate(dt.getDate() + offsetDays)
+            dt.setHours(hour, min, 0, 0)
+            return dt.toISOString()
         }
+
+        const events = [
+            {
+                id: 'evt-1', status: 'approved', category: 'musique',
+                title: "Soirée Coupé Décalé @ Marcory Zone 4",
+                date: d(1, 21), organizer: 'Babi Event', location: 'Marcory Zone 4',
+                coords: { lat: 5.297, lng: -3.974 }, distance: '1.2 km',
+                description: "Les meilleurs sons d'Abidjan pour danser jusqu'au matin ! Coupé décalé, zouglou, afrobeats.",
+                image: this.getPlaceholderImage(0), participantCount: 312, isPremium: false, price: 0,
+                features: ['Zouglou', 'Coupé Décalé', 'Bar']
+            },
+            {
+                id: 'evt-2', status: 'approved', category: 'afterwork',
+                title: "Afterwork Chill @ Cocody Vallons",
+                date: d(1, 18, 30), organizer: 'Life Magazine', location: 'Cocody Vallons',
+                coords: { lat: 5.352, lng: -3.998 }, distance: '4.7 km',
+                description: "Détente après le boulot avec cocktails et tapas. DJ set ambiance lounge.",
+                image: this.getPlaceholderImage(1), participantCount: 160, isPremium: false, price: 0,
+                features: ['Cocktails', 'Tapas', 'Afterwork']
+            },
+            {
+                id: 'evt-3', status: 'approved', category: 'musique',
+                title: "Concert Live Zouglou @ Yopougon Niangon",
+                date: d(3, 20), organizer: 'Pulse CI', location: 'Yopougon Niangon',
+                coords: { lat: 5.341, lng: -4.076 }, distance: '8.3 km',
+                description: "Wôyo authentique, ambiance garantie. Les meilleures voix de Côte d'Ivoire sur scène.",
+                image: this.getPlaceholderImage(2), participantCount: 480, isPremium: false, price: 0,
+                features: ['Zouglou', 'Concert', 'Live']
+            },
+            {
+                id: 'evt-4', status: 'approved', category: 'brunch',
+                title: "Brunch du Dimanche @ Riviera Golf",
+                date: d(4, 11), organizer: 'Club 225', location: 'Riviera Golf',
+                coords: { lat: 5.334, lng: -3.970 }, distance: '3.5 km',
+                description: "Buffet à volonté, piscine et musique live. Le meilleur brunch d'Abidjan.",
+                image: this.getPlaceholderImage(3), participantCount: 95, isPremium: true, price: 15000,
+                features: ['Buffet', 'Piscine', 'Brunch', 'VIP Access']
+            },
+            {
+                id: 'evt-5', status: 'approved', category: 'musique',
+                title: "Showcase Rap Ivoire @ Plateau",
+                date: d(5, 20, 30), organizer: 'Vibe Radio', location: 'Plateau',
+                coords: { lat: 5.324, lng: -4.020 }, distance: '2.1 km',
+                description: "Les nouvelles pépites du rap ivoirien en live. Freestyle, beatbox et surprises.",
+                image: this.getPlaceholderImage(4), participantCount: 220, isPremium: false, price: 2000,
+                features: ['Rap', 'Live', 'Concert'], ticketingEnabled: true, ticketPrice: 2000
+            },
+            {
+                id: 'evt-6', status: 'approved', category: 'dj',
+                title: "DJ Night @ Club Marcory",
+                date: d(2, 22), organizer: 'Abidjan.net', location: 'Marcory Zone 4',
+                coords: { lat: 5.298, lng: -3.975 }, distance: '1.3 km',
+                description: "La nuit des DJs les plus chauds d'Abidjan. Entrée VIP disponible.",
+                image: this.getPlaceholderImage(5), participantCount: 350, isPremium: true, price: 10000,
+                features: ['DJ', 'Club', 'VIP Access', 'Free Drink'], ticketingEnabled: true, ticketPrice: 10000
+            },
+            {
+                id: 'evt-7', status: 'approved', category: 'festival',
+                title: "Festival Grillades @ Treichville",
+                date: d(6, 17), organizer: 'Babi Event', location: 'Treichville',
+                coords: { lat: 5.299, lng: -4.009 }, distance: '2.8 km',
+                description: "Choukouya, poisson braisé et poulet piqué. Ambiance village authentique.",
+                image: this.getPlaceholderImage(6), participantCount: 491, isPremium: false, price: 0,
+                features: ['Festival', 'Grillades', 'Gastronomie']
+            },
+            {
+                id: 'evt-8', status: 'approved', category: 'sport',
+                title: "Match de Foot @ Stade Biétry",
+                date: d(4, 16), organizer: 'Pulse CI', location: 'Biétry',
+                coords: { lat: 5.286, lng: -3.982 }, distance: '2.4 km',
+                description: "Le derby d'Abidjan ! Atmosphere de feu garantie au stade.",
+                image: this.getPlaceholderImage(7), participantCount: 1200, isPremium: false, price: 1000,
+                features: ['Football', 'Sport', 'Derby'], ticketingEnabled: true, ticketPrice: 1000
+            },
+            {
+                id: 'evt-9', status: 'approved', category: 'art',
+                title: "Expo Art Contemporain @ Plateau",
+                date: d(7, 10), organizer: 'Club 225', location: 'Plateau',
+                coords: { lat: 5.325, lng: -4.021 }, distance: '2.0 km',
+                description: "Œuvres d'artistes ivoiriens émergents. Vernissage avec cocktail.",
+                image: this.getPlaceholderImage(8), participantCount: 65, isPremium: false, price: 0,
+                features: ['Art', 'Expo', 'Culture']
+            },
+            {
+                id: 'evt-10', status: 'approved', category: 'comedie',
+                title: "Stand-up Comedy Night @ Zone 4",
+                date: d(5, 20), organizer: 'Yopougon Enjaillement', location: 'Marcory Zone 4',
+                coords: { lat: 5.296, lng: -3.973 }, distance: '1.1 km',
+                description: "Les meilleurs humoristes ivoiriens sur scène. Rires garantis !",
+                image: this.getPlaceholderImage(9), participantCount: 180, isPremium: false, price: 3000,
+                features: ['Comédie', 'Humour', 'Stand-up'], ticketingEnabled: true, ticketPrice: 3000
+            },
+            {
+                id: 'evt-11', status: 'approved', category: 'dj',
+                title: "Nuit Électro @ Cocody",
+                date: d(8, 23), organizer: 'Life Magazine', location: 'Cocody Vallons',
+                coords: { lat: 5.353, lng: -3.999 }, distance: '4.8 km',
+                description: "Soirée electro, house et techno avec les meilleurs DJs d'Abidjan.",
+                image: this.getPlaceholderImage(10), participantCount: 290, isPremium: true, price: 8000,
+                features: ['DJ', 'Electro', 'Club'], ticketingEnabled: true, ticketPrice: 8000
+            },
+            {
+                id: 'evt-12', status: 'approved', category: 'brunch',
+                title: "Brunch Piscine @ Riviera Palmeraie",
+                date: d(10, 10, 30), organizer: 'Club 225', location: 'Riviera Golf',
+                coords: { lat: 5.333, lng: -3.968 }, distance: '3.2 km',
+                description: "Brunch buffet avec accès piscine. Musique chill et ambiance tropicale.",
+                image: this.getPlaceholderImage(11), participantCount: 120, isPremium: false, price: 12000,
+                features: ['Brunch', 'Piscine', 'Buffet'], ticketingEnabled: true, ticketPrice: 12000
+            },
+            {
+                id: 'evt-13', status: 'approved', category: 'musique',
+                title: "Concert Gospel @ Yopougon",
+                date: d(9, 17), organizer: 'Vibe Radio', location: 'Yopougon Niangon',
+                coords: { lat: 5.342, lng: -4.077 }, distance: '8.5 km',
+                description: "Grande soirée gospel avec les meilleures chorales d'Abidjan. Entrée libre.",
+                image: this.getPlaceholderImage(12), participantCount: 750, isPremium: false, price: 0,
+                features: ['Gospel', 'Concert', 'Chorale']
+            },
+            {
+                id: 'evt-14', status: 'approved', category: 'afterwork',
+                title: "Afterwork Jazz @ Café du Plateau",
+                date: d(11, 18), organizer: 'Abidjan.net', location: 'Plateau',
+                coords: { lat: 5.323, lng: -4.019 }, distance: '1.9 km',
+                description: "Sessions jazz live avec des musiciens locaux et internationaux.",
+                image: this.getPlaceholderImage(13), participantCount: 85, isPremium: false, price: 5000,
+                features: ['Jazz', 'Afterwork', 'Live'], ticketingEnabled: true, ticketPrice: 5000
+            },
+            {
+                id: 'evt-15', status: 'approved', category: 'festival',
+                title: "Festival Urbain Abidjan @ Treichville",
+                date: d(14, 16), organizer: 'Pulse CI', location: 'Treichville',
+                coords: { lat: 5.300, lng: -4.010 }, distance: '2.9 km',
+                description: "3 jours de festival : musique, danse, gastronomie et artisanat.",
+                image: this.getPlaceholderImage(14), participantCount: 2500, isPremium: false, price: 0,
+                features: ['Festival', 'Musique', 'Gastronomie']
+            },
+            {
+                id: 'evt-16', status: 'approved', category: 'sport',
+                title: "Tournoi Basketball @ Marcory",
+                date: d(12, 15), organizer: 'Babi Event', location: 'Mille Maquis',
+                coords: { lat: 5.309, lng: -3.951 }, distance: '0.4 km',
+                description: "Tournoi inter-quartiers de basket. Venez soutenir votre équipe !",
+                image: this.getPlaceholderImage(15), participantCount: 340, isPremium: false, price: 0,
+                features: ['Basketball', 'Sport', 'Tournoi']
+            },
+            {
+                id: 'evt-17', status: 'approved', category: 'art',
+                title: "Art Street Show @ Zone 4",
+                date: d(13, 17, 30), organizer: 'Club 225', location: 'Marcory Zone 4',
+                coords: { lat: 5.297, lng: -3.972 }, distance: '1.0 km',
+                description: "Graffiti, danse urbaine et musique dans les rues. Événement gratuit et ouvert à tous.",
+                image: this.getPlaceholderImage(16), participantCount: 200, isPremium: false, price: 0,
+                features: ['Art', 'Graffiti', 'Urbain']
+            },
+            {
+                id: 'evt-18', status: 'approved', category: 'comedie',
+                title: "Karaoké & Rires @ Biétry",
+                date: d(15, 20), organizer: 'Yopougon Enjaillement', location: 'Biétry',
+                coords: { lat: 5.287, lng: -3.983 }, distance: '2.5 km',
+                description: "Karaoké géant + sketches comiques. Venez chanter et rire entre amis !",
+                image: this.getPlaceholderImage(17), participantCount: 145, isPremium: false, price: 1500,
+                features: ['Karaoké', 'Comédie', 'Animation'], ticketingEnabled: true, ticketPrice: 1500
+            },
+            {
+                id: 'evt-19', status: 'approved', category: 'musique',
+                title: "Soirée Afrobeats @ Yopougon",
+                date: d(17, 21), organizer: 'Vibe Radio', location: 'Yopougon Niangon',
+                coords: { lat: 5.340, lng: -4.075 }, distance: '8.1 km',
+                description: "Les hits afrobeats et dancehall de l'année. DJ international invité.",
+                image: this.getPlaceholderImage(18), participantCount: 420, isPremium: true, price: 7000,
+                features: ['Afrobeats', 'Dancehall', 'DJ'], ticketingEnabled: true, ticketPrice: 7000
+            },
+            {
+                id: 'evt-20', status: 'approved', category: 'afterwork',
+                title: "Afterwork Beach @ Grand-Bassam",
+                date: d(20, 17), organizer: 'Life Magazine', location: 'Grand-Bassam',
+                coords: { lat: 5.200, lng: -3.735 }, distance: '30 km',
+                description: "Excursion afterwork sur la plage de Grand-Bassam. Transport organisé depuis Abidjan.",
+                image: this.getPlaceholderImage(19), participantCount: 75, isPremium: false, price: 5000,
+                features: ['Beach', 'Afterwork', 'Excursion'], ticketingEnabled: true, ticketPrice: 5000
+            }
+        ]
 
         this.events.value = events
     }

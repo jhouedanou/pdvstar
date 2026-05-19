@@ -33,6 +33,8 @@ const isOrganizerMode = computed(() => !adminStore.isAuthenticated && userStore.
 // Charger les événements et demander les permissions au montage
 onMounted(async () => {
     await eventStore.loadEvents()
+    // Dépublier automatiquement les événements passés
+    autoDeprecatePastEvents()
     // Demander les permissions au montage
     requestMicPermission()
     requestCameraPermission()
@@ -46,13 +48,38 @@ onMounted(async () => {
     }
 })
 
-// Permission microphone
-const micPermission = ref('prompt') // 'granted' | 'denied' | 'prompt'
+// ============================
+// Auto-dépublication des événements passés
+// ============================
+const autoDeprecatePastEvents = async () => {
+    const now = new Date()
+    const pastApproved = eventStore.events.filter(e =>
+        e.date &&
+        new Date(e.date) < now &&
+        (e.status === 'approved' || !e.status)
+    )
+    for (const event of pastApproved) {
+        await eventStore.updateEvent(event.id, { status: 'archived' })
+    }
+    if (pastApproved.length > 0) {
+        console.log(`${pastApproved.length} événement(s) archivé(s) automatiquement.`)
+    }
+}
+
+const deleteAllArchived = async () => {
+    const archived = eventStore.events.filter(e => e.status === 'archived')
+    if (!archived.length) return
+    if (!confirm(`Supprimer définitivement ${archived.length} événement(s) archivé(s) ? Action irréversible.`)) return
+    for (const event of archived) {
+        await eventStore.deleteEvent(event.id)
+    }
+}
 
 /**
  * Demander la permission microphone dès l'entrée dans l'admin
  * Cela déclenche le popup de permission du navigateur une seule fois
  */
+const micPermission = ref('prompt') // 'granted' | 'denied' | 'prompt'
 const requestMicPermission = async () => {
     try {
         // 1. Vérifier d'abord via l'API Permissions si disponible
@@ -332,7 +359,7 @@ const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const editingEvent = ref(null)
 const deleteConfirmId = ref(null)
-const statusFilter = ref('all') // all, pending, approved, rejected
+const statusFilter = ref('all') // all, pending, approved, rejected, archived
 const organizerFilter = ref('')
 const locationFilter = ref('')
 
@@ -368,10 +395,11 @@ const rejectionReason = ref('')
 const statusCounts = computed(() => {
     const all = isOrganizerMode.value ? events.value : eventStore.events
     return {
-        all: all.length,
+        all: all.filter(e => e.status !== 'archived').length,
         pending: all.filter(e => e.status === 'pending').length,
         approved: all.filter(e => !e.status || e.status === 'approved').length,
-        rejected: all.filter(e => e.status === 'rejected').length
+        rejected: all.filter(e => e.status === 'rejected').length,
+        archived: all.filter(e => e.status === 'archived').length
     }
 })
 
@@ -602,6 +630,9 @@ const events = computed(() => {
         } else {
             list = list.filter(e => e.status === statusFilter.value)
         }
+    } else {
+        // 'all' = exclure les archivés
+        list = list.filter(e => e.status !== 'archived')
     }
     // Tri chronologique : du plus récent au plus ancien
     if (organizerFilter.value.trim()) {
@@ -1493,6 +1524,20 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
           class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border flex items-center gap-1.5"
           :class="statusFilter === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-gray-800 text-red-400 border-gray-700 hover:border-red-500/50'">
           <ShieldX class="w-3 h-3" /> Rejetés ({{ statusCounts.rejected }})
+        </button>
+        <button @click="statusFilter = 'archived'"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold transition border flex items-center gap-1.5"
+          :class="statusFilter === 'archived' ? 'bg-gray-500 text-white border-gray-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500/50'">
+          <Trash2 class="w-3 h-3" /> Passés archivés ({{ statusCounts.archived }})
+        </button>
+      </div>
+
+      <!-- Action: supprimer tous les archivés -->
+      <div v-if="!isOrganizerMode && statusFilter === 'archived' && statusCounts.archived > 0" class="mb-4">
+        <button @click="deleteAllArchived"
+          class="flex items-center gap-2 bg-red-900/30 border border-red-700/50 text-red-400 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-900/50 transition">
+          <Trash2 class="w-4 h-4" />
+          Supprimer définitivement tous les archivés ({{ statusCounts.archived }})
         </button>
       </div>
 

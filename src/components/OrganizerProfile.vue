@@ -2,7 +2,8 @@
 import { computed, ref } from 'vue'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
-import { Users, Calendar, MapPin, Heart, X, Check, Clock, Share2, Crown, Play } from 'lucide-vue-next'
+import { db } from '../services/db'
+import { Users, Calendar, MapPin, Heart, X, Check, Clock, Share2, Crown, Play, TrendingUp } from 'lucide-vue-next'
 
 const props = defineProps({
     organizerName: {
@@ -53,6 +54,18 @@ const hasVideo = (event) => {
 // Filter events for this organizer
 const organizerEvents = computed(() => {
     return eventStore.events.filter(e => e.organizer === props.organizerName)
+})
+
+const publishedEvents = computed(() => {
+    return organizerEvents.value.filter(e => !e.status || e.status === 'approved')
+})
+
+const totalParticipants = computed(() => {
+    return organizerEvents.value.reduce((sum, e) => sum + (e.participantCount || 0), 0)
+})
+
+const followersCount = computed(() => {
+    return (db.users.value || []).filter(u => u.following?.includes(props.organizerName)).length
 })
 
 const isFollowing = computed(() => {
@@ -113,10 +126,20 @@ const formatDate = (dateStr) => {
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Organisateur certifié Abidjan 🇨🇮</p>
 
             <!-- Stats -->
-            <div class="flex items-center gap-8 mb-6">
+            <div class="flex items-center gap-6 mb-6">
                 <div class="text-center">
-                    <span class="block font-bold text-xl text-black dark:text-white">{{ organizerEvents.length }}</span>
-                    <span class="text-xs text-gray-500 uppercase tracking-wider">Événements</span>
+                    <span class="block font-bold text-xl text-black dark:text-white">{{ publishedEvents.length }}</span>
+                    <span class="text-xs text-gray-500 uppercase tracking-wider">Events</span>
+                </div>
+                <div class="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+                <div class="text-center">
+                    <span class="block font-bold text-xl text-black dark:text-white">{{ totalParticipants }}</span>
+                    <span class="text-xs text-gray-500 uppercase tracking-wider">Inscrits</span>
+                </div>
+                <div class="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+                <div class="text-center">
+                    <span class="block font-bold text-xl text-black dark:text-white">{{ followersCount }}</span>
+                    <span class="text-xs text-gray-500 uppercase tracking-wider">Abonnés</span>
                 </div>
             </div>
 

@@ -4,7 +4,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX, Map as MapIcon } from 'lucide-vue-next'
 import { reportEvent } from '../services/supabase'
 import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
@@ -17,7 +17,8 @@ import L from 'leaflet'
 import { sendAttendanceNotification, sendWhatsAppLocation } from '../services/greenApiService'
 import { db } from '../services/db'
 import { fetchActiveAds } from '../services/supabase'
-import { createRsvp, markRsvpNotified } from '../services/rsvpService'
+import { createRsvp, markRsvpNotified, genRsvpQrPayload } from '../services/rsvpService'
+import { buildQrDataUrl } from '../services/ticketService'
 import { trackEventInteraction } from '../services/interactionService'
 
 const eventStore = useEventStore()
@@ -31,6 +32,11 @@ const sendingMessage = ref(false)
 const messageError = ref('')
 const messageSuccess = ref('')
 const { coords, resume } = useGeolocation()
+
+// QR RSVP modal (affiché après confirmation J'y vais)
+const rsvpQrModal = ref(false)
+const rsvpQrUrl = ref('')
+const rsvpQrEventTitle = ref('')
 
 // Get Ads from Supabase (fallback to local DB)
 const ads = ref(db.getAds())
@@ -48,6 +54,38 @@ const feedDateFilter = ref('all')
 const feedPriceFilter = ref('all')
 const feedNearMeOnly = ref(false)
 
+// ===== Onboarding préférences (1ère ouverture) =====
+const PREFERENCE_CATEGORIES = [
+    { id: 'musique', label: 'Musique', emoji: '🎵' },
+    { id: 'dj', label: 'DJ / Club', emoji: '🎧' },
+    { id: 'brunch', label: 'Brunch', emoji: '🥂' },
+    { id: 'sport', label: 'Sport', emoji: '⚽' },
+    { id: 'art', label: 'Art & Culture', emoji: '🎨' },
+    { id: 'comedie', label: 'Comédie', emoji: '😂' },
+    { id: 'gratuit', label: 'Gratuit', emoji: '🆓' },
+    { id: 'premium', label: 'Premium', emoji: '⭐' },
+    { id: 'afterwork', label: 'Afterwork', emoji: '🍹' },
+    { id: 'festival', label: 'Festival', emoji: '🎪' },
+]
+const showOnboarding = ref(false)
+const _savedPrefs = localStorage.getItem('pdvstar_user_preferences')
+const selectedPreferences = ref(_savedPrefs ? JSON.parse(_savedPrefs) : [])
+const checkOnboarding = () => {
+    if (!localStorage.getItem('pdvstar_onboarding_done')) {
+        showOnboarding.value = true
+    }
+}
+const togglePreference = (id) => {
+    const idx = selectedPreferences.value.indexOf(id)
+    if (idx === -1) selectedPreferences.value.push(id)
+    else selectedPreferences.value.splice(idx, 1)
+}
+const saveOnboarding = () => {
+    localStorage.setItem('pdvstar_user_preferences', JSON.stringify(selectedPreferences.value))
+    localStorage.setItem('pdvstar_onboarding_done', '1')
+    showOnboarding.value = false
+}
+
 const feedDateOptions = [
     { v: 'all', l: 'Tous' },
     { v: 'today', l: "Aujourd'hui" },
@@ -56,10 +94,21 @@ const feedDateOptions = [
 ]
 
 const feedPriceOptions = [
-    { v: 'all', l: 'Prix' },
     { v: 'free', l: 'Gratuit' },
     { v: 'paid', l: 'Payant' }
 ]
+
+const FEED_CATEGORIES = [
+    { v: 'musique', l: '\u{1F3B5} Musique' },
+    { v: 'dj', l: '\u{1F3A7} DJ' },
+    { v: 'brunch', l: '\u{1F942} Brunch' },
+    { v: 'sport', l: '\u26BD Sport' },
+    { v: 'art', l: '\u{1F3A8} Art' },
+    { v: 'comedie', l: '\u{1F602} Comédie' },
+    { v: 'afterwork', l: '\u{1F379} Afterwork' },
+    { v: 'festival', l: '\u{1F3AA} Festival' },
+]
+const feedCategoryFilter = ref('all')
 
 // Splash screen : simule la première interaction pour débloquer l'autoplay audio
 const hasInteracted = ref(false)
@@ -158,6 +207,23 @@ const computeRelevanceScore = (event) => {
     // 7. Avec promo
     if (event.promoText) score += 10
 
+    // 8. Préférences utilisateur
+    if (selectedPreferences.value.length > 0) {
+        const prefs = selectedPreferences.value
+        const features = (event.features || []).map(f => f.toLowerCase())
+        const title = (event.title || '').toLowerCase()
+        if (prefs.includes('dj') && (features.some(f => f.includes('dj') || f.includes('club')) || title.includes('dj') || title.includes('club'))) score += 20
+        if (prefs.includes('musique') && (features.some(f => f.includes('music') || f.includes('concert') || f.includes('son') || f.includes('zouglou') || f.includes('coupé') || f.includes('afro')) || title.includes('concert') || title.includes('live'))) score += 15
+        if (prefs.includes('brunch') && (title.includes('brunch') || features.some(f => f.includes('brunch')))) score += 20
+        if (prefs.includes('sport') && (features.some(f => f.includes('sport') || f.includes('match')) || title.includes('sport') || title.includes('match'))) score += 20
+        if (prefs.includes('art') && (features.some(f => f.includes('art') || f.includes('culture') || f.includes('expo')) || title.includes('art') || title.includes('expo'))) score += 15
+        if (prefs.includes('comedie') && (features.some(f => f.includes('comédie') || f.includes('humour') || f.includes('stand')) || title.includes('comédie') || title.includes('humour'))) score += 20
+        if (prefs.includes('gratuit') && !(event.ticketingEnabled || event.ticketPrice > 0 || event.price > 0)) score += 10
+        if (prefs.includes('premium') && event.isPremium) score += 20
+        if (prefs.includes('afterwork') && (title.includes('afterwork') || features.some(f => f.includes('afterwork')))) score += 20
+        if (prefs.includes('festival') && (title.includes('festival') || features.some(f => f.includes('festival')))) score += 20
+    }
+
     return score
 }
 
@@ -202,6 +268,11 @@ const matchesFeedFilters = (event) => {
     if (feedPriceFilter.value === 'free' && isPaid) return false
     if (feedPriceFilter.value === 'paid' && !isPaid) return false
 
+    // Filtre catégorie
+    if (feedCategoryFilter.value !== 'all') {
+        if ((event.category || '').toLowerCase() !== feedCategoryFilter.value) return false
+    }
+
     // Filtre proche : ignorer si géoloc indisponible
     if (feedNearMeOnly.value) {
         if (!userHasCoords.value || !event.coords?.lat) return true // fallback tout montrer
@@ -230,12 +301,9 @@ const feedItems = computed(() => {
 
     // Séparer : events à venir vs passés
     const upcomingEvents = approvedEvents.filter(e => new Date(e.date) >= today)
-    const pastEvents = approvedEvents.filter(e => new Date(e.date) < today)
 
-    // Utiliser les events à venir ; si aucun, fallback sur les plus récents (max 20)
-    let displayEvents = upcomingEvents.length > 0
-        ? upcomingEvents
-        : pastEvents.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20)
+    // N'afficher que les événements à venir (jamais les passés)
+    let displayEvents = upcomingEvents
 
     // Tri par score de pertinence (décroissant) puis par date (croissant)
     displayEvents = displayEvents
@@ -407,6 +475,8 @@ onMounted(async () => {
     // Show profile modal if user doesn't have a profile
     if (!userStore.isProfileComplete) {
         showProfileModal.value = true
+    } else {
+        checkOnboarding()
     }
 
     // Check Location Recommendations
@@ -511,6 +581,7 @@ const toggleMute = () => {
 
 const handleProfileCreated = () => {
     showProfileModal.value = false
+    checkOnboarding()
 }
 
 // --- Modal States ---
@@ -765,6 +836,7 @@ const searchDateFilter = ref('all') // all, today, this_week, this_month
 const searchPriceFilter = ref('all') // all, free, paid
 const searchLocationFilter = ref('')
 const searchTagFilter = ref('')
+const searchNearMeOnly = ref(false)
 
 // Extraire les lieux uniques et tags uniques pour les filtres
 const uniqueLocations = computed(() => {
@@ -783,6 +855,7 @@ const resetSearchFilters = () => {
     searchPriceFilter.value = 'all'
     searchLocationFilter.value = ''
     searchTagFilter.value = ''
+    searchNearMeOnly.value = false
 }
 
 const activeFiltersCount = computed(() => {
@@ -792,6 +865,7 @@ const activeFiltersCount = computed(() => {
     if (searchPriceFilter.value !== 'all') count++
     if (searchLocationFilter.value) count++
     if (searchTagFilter.value) count++
+    if (searchNearMeOnly.value) count++
     return count
 })
 
@@ -802,8 +876,8 @@ const dateFilterOptions = [
     { v: 'this_month', l: 'Ce mois' }
 ]
 
+// Bouton 'Tous prix' retiré : un re-clic sur Gratuit/Payant remet à 'all'
 const priceFilterOptions = [
-    { v: 'all', l: 'Tous prix' },
     { v: 'free', l: 'Gratuit' },
     { v: 'paid', l: 'Payant' }
 ]
@@ -812,10 +886,11 @@ const filteredEvents = computed(() => {
     const now = new Date()
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 
-    // Tous events approuvés — inclure passés aussi pour recherche complète
+    // Tous events approuvés à venir uniquement
     let results = eventStore.events
         .filter(e => !!e.date)
         .filter(e => !e.status || e.status === 'approved')
+        .filter(e => new Date(e.date) >= today)
     
     // Filtre premium
     if (showPremiumOnly.value) {
@@ -860,9 +935,9 @@ const filteredEvents = computed(() => {
 
     // Filtre par prix
     if (searchPriceFilter.value === 'free') {
-        results = results.filter(e => !e.isPremium || !e.price)
+        results = results.filter(e => !(e.ticketingEnabled || e.ticketPrice > 0 || e.price > 0))
     } else if (searchPriceFilter.value === 'paid') {
-        results = results.filter(e => e.isPremium && e.price > 0)
+        results = results.filter(e => e.ticketingEnabled || e.ticketPrice > 0 || e.price > 0)
     }
 
     // Filtre par lieu
@@ -874,7 +949,19 @@ const filteredEvents = computed(() => {
     if (searchTagFilter.value) {
         results = results.filter(e => (e.features || []).some(f => f === searchTagFilter.value))
     }
-    
+
+    // Filtre proximité (géoloc)
+    if (searchNearMeOnly.value && userHasCoords.value) {
+        results = results.filter(e => {
+            if (!e.coords?.lat) return false
+            const dist = getDistanceFromLatLonInKm(
+                coords.value.latitude, coords.value.longitude,
+                e.coords.lat, e.coords.lng
+            )
+            return dist <= 15 // 15 km
+        })
+    }
+
     // Tri chronologique : du plus proche au plus lointain
     return results.sort((a, b) => new Date(a.date) - new Date(b.date))
 })
@@ -955,7 +1042,18 @@ const handleJyVais = async (event) => {
             console.error('RSVP persist failed', err)
         }
 
-        messageSuccess.value = 'Participation confirmee.'
+        messageSuccess.value = 'Participation confirmée.'
+
+        // Générer QR code RSVP pour contrôle d'accès à l'entrée
+        try {
+            const qrPayload = genRsvpQrPayload(event.id, pseudo, userStore.user.phone)
+            const qrUrl = await buildQrDataUrl(qrPayload)
+            rsvpQrUrl.value = qrUrl
+            rsvpQrEventTitle.value = event.title || 'Événement'
+            rsvpQrModal.value = true
+        } catch (e) {
+            console.warn('QR RSVP non généré:', e)
+        }
 
         // Send WhatsApp Notification
         if (userStore.user && userStore.user.phone) {
@@ -968,7 +1066,7 @@ const handleJyVais = async (event) => {
                     district: userStore.user.district || event.district || event.quartier || ''
                 })
                 if (result?.success && rsvp?.id) markRsvpNotified(rsvp.id)
-                if (result?.success) messageSuccess.value = 'Participation confirmee. Organisateur notifie.'
+                if (result?.success) messageSuccess.value = 'Participation confirmée. Organisateur notifié.'
             } catch (err) {
                 console.error('Notification failed', err)
             } finally {
@@ -1353,6 +1451,63 @@ const handleDeleteEvent = async (eventId) => {
       </div>
     </Transition>
 
+    <!-- ONBOARDING PRÉFÉRENCES (1ère ouverture) -->
+    <!-- MODALE QR CODE RSVP -->
+    <Teleport to="body">
+      <div v-if="rsvpQrModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+        <div class="bg-gray-900 rounded-2xl border border-gray-700 w-full max-w-sm p-6 text-center">
+          <div class="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <h3 class="text-lg font-bold text-white mb-1">Participation confirmée !</h3>
+          <p class="text-gray-400 text-sm mb-4">Présentez ce QR code à l'entrée de l'événement.</p>
+          <div class="text-xs text-primary font-medium mb-3 truncate">{{ rsvpQrEventTitle }}</div>
+          <div class="bg-white rounded-xl p-3 mx-auto w-52 h-52 flex items-center justify-center">
+            <img v-if="rsvpQrUrl" :src="rsvpQrUrl" class="w-full h-full object-contain" alt="QR code d'entrée" />
+            <div v-else class="text-gray-400 text-xs">Génération...</div>
+          </div>
+          <p class="text-gray-500 text-xs mt-3 mb-5">Ce QR est unique. Gardez-le précieusement.</p>
+          <button @click="rsvpQrModal = false" class="w-full bg-primary text-black font-bold py-3 rounded-xl">
+            Fermer
+          </button>
+        </div>
+      </div>
+    </Teleport>
+    <Transition name="splash">
+      <div v-if="hasInteracted && showOnboarding"
+        class="fixed inset-0 z-[95] flex flex-col bg-black/98 backdrop-blur-xl overflow-y-auto">
+        <div class="flex-1 flex flex-col justify-end px-6 pt-16 pb-8">
+          <div class="mb-6">
+            <h2 class="text-3xl font-black text-white mb-2 leading-tight">
+              Quels types d'événements<br/><span class="text-primary">t'intéressent ?</span>
+            </h2>
+            <p class="text-gray-400 text-sm">Personnalise ton feed en quelques secondes</p>
+          </div>
+          <div class="grid grid-cols-2 gap-2.5 mb-8">
+            <button
+              v-for="cat in PREFERENCE_CATEGORIES" :key="cat.id"
+              @click="togglePreference(cat.id)"
+              class="flex items-center gap-2.5 p-3.5 rounded-2xl border-2 transition active:scale-95 text-left"
+              :class="selectedPreferences.includes(cat.id)
+                ? 'border-primary bg-primary/15 text-white'
+                : 'border-white/10 bg-white/5 text-gray-400'"
+            >
+              <span class="text-xl">{{ cat.emoji }}</span>
+              <span class="font-semibold text-sm flex-1">{{ cat.label }}</span>
+              <Check v-if="selectedPreferences.includes(cat.id)" class="w-4 h-4 text-primary flex-shrink-0" />
+            </button>
+          </div>
+          <button
+            @click="saveOnboarding"
+            class="w-full bg-primary text-black font-black py-4 rounded-2xl text-base transition active:scale-95 mb-3"
+          >
+            {{ selectedPreferences.length > 0 ? `Confirmer (${selectedPreferences.length} sélectionné${selectedPreferences.length > 1 ? 's' : ''})` : 'Passer' }}
+          </button>
+          <p class="text-gray-600 text-xs text-center">Modifiable à tout moment dans ton profil</p>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Header pill -->
     <div class="header-tabs absolute top-0 w-full z-20 pt-12 pb-3 flex justify-center items-center pointer-events-auto">
        <div class="flex items-center gap-2 bg-black/50 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10">
@@ -1389,13 +1544,34 @@ const handleDeleteEvent = async (eventId) => {
           Proche
           <span v-if="feedNearMeOnly && !userHasCoords" class="text-[8px] opacity-70">(!)</span>
         </button>
+        <button
+          v-for="opt in feedPriceOptions"
+          :key="opt.v"
+          @click="feedPriceFilter = feedPriceFilter === opt.v ? 'all' : opt.v"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
+          :class="feedPriceFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
+        >
+          {{ opt.l }}
+        </button>
         <!-- Reset tous filtres -->
         <button
-          v-if="feedDateFilter !== 'all' || feedPriceFilter !== 'all' || feedNearMeOnly"
-          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false"
+          v-if="feedDateFilter !== 'all' || feedPriceFilter !== 'all' || feedNearMeOnly || feedCategoryFilter !== 'all'"
+          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false; feedCategoryFilter = 'all'"
           class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition bg-red-500/20 text-red-400 border-red-500/30"
         >
           Réinitialiser
+        </button>
+      </div>
+      <!-- Rangée 2 : Filtre catégories -->
+      <div class="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 mt-1.5" style="touch-action: pan-x; -webkit-overflow-scrolling: touch;">
+        <button
+          v-for="cat in FEED_CATEGORIES"
+          :key="cat.v"
+          @click="feedCategoryFilter = feedCategoryFilter === cat.v ? 'all' : cat.v"
+          class="whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-bold border backdrop-blur-md transition"
+          :class="feedCategoryFilter === cat.v ? 'bg-primary text-black border-primary' : 'bg-black/30 text-white/70 border-white/10'"
+        >
+          {{ cat.l }}
         </button>
       </div>
     </div>
@@ -1409,7 +1585,7 @@ const handleDeleteEvent = async (eventId) => {
         <p class="text-gray-400 font-bold text-lg">Aucun événement</p>
         <p class="text-gray-600 text-sm">Aucun résultat pour ce filtre.</p>
         <button
-          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false"
+          @click="feedDateFilter = 'all'; feedPriceFilter = 'all'; feedNearMeOnly = false; feedCategoryFilter = 'all'"
           class="bg-primary text-black font-bold px-6 py-2.5 rounded-full text-sm mt-2"
         >
           Voir tous les événements
@@ -1514,11 +1690,16 @@ const handleDeleteEvent = async (eventId) => {
         <div class="action-buttons absolute right-2 bottom-28 flex flex-col gap-6 z-20 items-center">
            <!-- Profile/Organizer Avatar (TikTok style) -->
            <div class="relative mb-2 cursor-pointer" @click="openOrganizerProfile(item.data.organizer)">
-             <div class="w-12 h-12 rounded-full border-2 border-primary overflow-hidden p-0.5">
+             <div class="w-12 h-12 rounded-full overflow-hidden p-0.5 transition"
+               :class="userStore.user?.following?.includes(item.data.organizer) ? 'border-2 border-green-400' : 'border-2 border-primary'">
                <img :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${item.data.organizer}`" class="w-full h-full rounded-full bg-white" />
              </div>
-             <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-primary rounded-full w-5 h-5 flex items-center justify-center border border-black">
-               <span class="text-black text-xs font-bold">+</span>
+             <!-- Bouton + ou check — clic direct pour follow/unfollow sans ouvrir le profil -->
+             <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full w-5 h-5 flex items-center justify-center border border-black transition"
+               :class="userStore.user?.following?.includes(item.data.organizer) ? 'bg-green-400' : 'bg-primary'"
+               @click.stop="userStore.toggleFollow(item.data.organizer)">
+               <Check v-if="userStore.user?.following?.includes(item.data.organizer)" class="w-3 h-3 text-black" />
+               <span v-else class="text-black text-xs font-bold leading-none">+</span>
              </div>
            </div>
 
@@ -1644,8 +1825,10 @@ const handleDeleteEvent = async (eventId) => {
               <div class="whitespace-nowrap animate-marquee text-xs font-medium">
                   <span v-if="item.data.backgroundMusic" class="mr-4">{{ item.data.musicTitle || 'Musique de fond' }}</span>
                   <span v-if="item.data.backgroundMusic" class="mr-4">{{ item.data.musicTitle || 'Musique de fond' }}</span>
-                  <span v-if="!item.data.backgroundMusic" class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
-                  <span v-if="!item.data.backgroundMusic" class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
+                  <template v-if="!item.data.backgroundMusic">
+                    <span v-if="item.data.organizer || item.data.organizerName" class="mr-4">{{ item.data.organizer || item.data.organizerName }}</span>
+                    <span v-if="item.data.organizer || item.data.organizerName" class="mr-4">{{ item.data.organizer || item.data.organizerName }}</span>
+                  </template>
               </div>
           </div>
         </div>
@@ -1803,34 +1986,48 @@ const handleDeleteEvent = async (eventId) => {
 
             <!-- Filters Row -->
             <div class="flex flex-col gap-2 mb-4">
-                <!-- Date Filter -->
-                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                    <button v-for="opt in dateFilterOptions" 
+                <!-- Ligne unique scrollable contenant tous les filtres -->
+                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1" style="touch-action: pan-x; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;">
+                    <!-- Date -->
+                    <button v-for="opt in dateFilterOptions"
                         :key="opt.v"
                         @click="searchDateFilter = opt.v"
-                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border flex-shrink-0"
                         :class="searchDateFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
                     >
-                        <Calendar v-if="opt.v !== 'all'" class="w-3 h-3 inline mr-1" />{{ opt.l }}
+                        {{ opt.l }}
                     </button>
-                </div>
-
-                <!-- Price + Premium Filter -->
-                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                    <button v-for="opt in priceFilterOptions" 
+                    <!-- Séparateur -->
+                    <div class="w-px bg-gray-300 dark:bg-gray-700 flex-shrink-0 self-stretch my-1" />
+                    <!-- Prix -->
+                    <button v-for="opt in priceFilterOptions"
                         :key="opt.v"
-                        @click="searchPriceFilter = opt.v"
-                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
+                        @click="searchPriceFilter = searchPriceFilter === opt.v ? 'all' : opt.v"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border flex-shrink-0"
                         :class="searchPriceFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
                     >
                         {{ opt.l }}
                     </button>
-                    <button 
+                    <!-- Premium -->
+                    <button
                         @click="showPremiumOnly = !showPremiumOnly"
-                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border flex items-center gap-1"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border flex-shrink-0 flex items-center gap-1"
                         :class="showPremiumOnly ? 'bg-gradient-to-r from-yellow-400 to-amber-500 text-black border-amber-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
                     >
                         <Crown class="w-3 h-3" /> Premium
+                    </button>
+                    <!-- Proche -->
+                    <button
+                        @click="searchNearMeOnly = !searchNearMeOnly"
+                        :disabled="!userHasCoords"
+                        :title="userHasCoords ? 'Événements à moins de 15 km' : 'Activez la géolocalisation pour utiliser ce filtre'"
+                        class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border flex-shrink-0 flex items-center gap-1"
+                        :class="[
+                            searchNearMeOnly ? 'bg-primary text-black border-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700',
+                            !userHasCoords ? 'opacity-50 cursor-not-allowed' : ''
+                        ]"
+                    >
+                        <MapPin class="w-3 h-3" /> Proche
                     </button>
                 </div>
 

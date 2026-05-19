@@ -9,10 +9,12 @@ import UserProfileModal from '../components/UserProfileModal.vue'
 import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, MapPin,
   Check, X, Loader2, Store, Megaphone, Clock,
-  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users
+  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
 import { fetchEventStats } from '../services/statsService'
+import { listRsvpsForEvent } from '../services/rsvpService'
+import { sendWhatsAppMessage } from '../services/greenApiService'
 
 const router = useRouter()
 const eventStore = useEventStore()
@@ -32,16 +34,22 @@ const isOrganizer = computed(() => userStore.isOrganizer)
 
 // Vérifier l'auth au montage
 onMounted(async () => {
-  if (!isAuthenticated.value) {
-    showProfileModal.value = true
-    return
-  }
-  if (!isOrganizer.value) {
-    showBecomeOrganizerModal.value = true
-    return
-  }
+  if (!isAuthenticated.value) { showProfileModal.value = true; return }
+  if (!isOrganizer.value) { showBecomeOrganizerModal.value = true; return }
   await eventStore.loadEvents()
   await userStore.loadActivePass()
+  // Compter followers
+  try {
+    const { supabase } = await import('../services/supabase')
+    const names = [userStore.user?.organizerName, userStore.user?.spaceName, userStore.user?.name].filter(Boolean)
+    if (names.length) {
+      const { count } = await supabase
+        .from('users')
+        .select('id', { count: 'exact', head: true })
+        .overlaps('following', names)
+      followersCount.value = count || 0
+    }
+  } catch {}
 })
 
 const handleProfileCreated = async () => {
@@ -89,6 +97,56 @@ const myEvents = computed(() => {
     return names.some(n => orgName === n || orgName.includes(n))
   })
 })
+
+// Followers : users qui suivent l'organisateur
+const followersCount = ref(0)
+
+// Onglet actif : 'events' | 'participants'
+const activeTab = ref('events')
+
+// Liste des participants (RSVP toutes mes événements confondues)
+const participants = ref([])
+const loadingParticipants = ref(false)
+const contactingSendingTo = ref(null)
+
+const loadParticipants = async () => {
+  if (loadingParticipants.value) return
+  loadingParticipants.value = true
+  try {
+    const results = []
+    for (const event of myEvents.value) {
+      const rsvps = await listRsvpsForEvent(event.id)
+      rsvps.forEach(r => results.push({ ...r, eventTitle: event.title, eventDate: event.date }))
+    }
+    // Dédupliquer par phone + eventId
+    const seen = new Set()
+    participants.value = results.filter(r => {
+      const key = `${r.event_id || r.eventId}:${r.phone}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+  } catch (e) {
+    console.error('loadParticipants error:', e)
+  } finally {
+    loadingParticipants.value = false
+  }
+}
+
+const contactParticipant = async (p) => {
+  if (!p.phone) return
+  contactingSendingTo.value = p.phone
+  const organizerName = userStore.user?.organizerName || userStore.user?.spaceName || userStore.user?.name || 'L\'organisateur'
+  const msg = `Bonjour ${p.pseudo || p.phone} 👋\n\nMessage de ${organizerName} concernant l\'événement : ${p.eventTitle || ''}\n\nMerci pour votre intérêt !`
+  try {
+    await sendWhatsAppMessage(p.phone, msg)
+    alert(`Message envoyé à ${p.pseudo || p.phone} !`)
+  } catch (e) {
+    alert(`Échec : ${e.message}`)
+  } finally {
+    contactingSendingTo.value = null
+  }
+}
 
 // Stats par event (RSVP + tickets) - chargé à la demande
 const eventStats = ref({})  // { [eventId]: { rsvpCount, ticketsSold, revenue, ... } }
@@ -232,11 +290,11 @@ const formatDate = (dateStr) => {
       </header>
 
       <main class="max-w-6xl mx-auto p-4">
-        <!-- Grille Stats (4 cards) -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <!-- Grille Stats -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
           <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
             <p class="text-2xl font-bold text-primary">{{ statusCounts.all }}</p>
-            <p class="text-gray-500 text-xs mt-1">Total</p>
+            <p class="text-gray-500 text-xs mt-1">Événements</p>
           </div>
           <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
             <p class="text-2xl font-bold text-green-400">{{ statusCounts.approved }}</p>
@@ -249,6 +307,10 @@ const formatDate = (dateStr) => {
           <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
             <p class="text-2xl font-bold text-red-400">{{ statusCounts.rejected }}</p>
             <p class="text-gray-500 text-xs mt-1">Refusés</p>
+          </div>
+          <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
+            <p class="text-2xl font-bold text-blue-400">{{ followersCount }}</p>
+            <p class="text-gray-500 text-xs mt-1">Abonnés</p>
           </div>
         </div>
 

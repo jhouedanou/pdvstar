@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useUserStore } from './stores/userStore'
 import { initPush, subscribeUser } from './services/pushService'
 import AdminLayout from './components/AdminLayout.vue'
+import PWAInstallPrompt from './components/PWAInstallPrompt.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -22,6 +23,8 @@ watch(() => userStore.user?.id, (uid) => {
 </script>
 
 <template>
+  <PWAInstallPrompt />
+
   <!-- Admin : full-width avec sidebar layout -->
   <AdminLayout v-if="isAdminRoute">
     <router-view />

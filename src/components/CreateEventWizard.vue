@@ -1,21 +1,37 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@vueuse/core'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { processImage, processAndUpload } from '../utils/imageUpload'
-import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, MapPin, Ticket, Type } from 'lucide-vue-next'
+import { useDictation } from '../composables/useDictation'
+import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, MapPin, Ticket, Type, Mic, MicOff, Music } from 'lucide-vue-next'
 
 const router = useRouter()
 const store = useEventStore()
 const userStore = useUserStore()
 const { coords, resume } = useGeolocation()
 
+// Dictée vocale pour la description
+const { supported: dictSupported, isListening: isDictating, transcript: dictTranscript, start: startDictation, stop: stopDictation, reset: resetDictation } = useDictation('fr-FR')
+
+// Appliquer la transcription dans la description
+watch(dictTranscript, (t) => {
+    if (t) form.value.description = t
+})
+
 const step = ref(1)
 const isSubmitting = ref(false)
 const imageError = ref('')
 const tagsInput = ref('')
+const gpsLoading = ref(false)
+const gpsError = ref('')
+
+// Date et heure séparées
+const todayStr = new Date().toISOString().slice(0, 10)
+const eventDateStr = ref(new Date(Date.now() + 86400000).toISOString().slice(0, 10)) // demain par défaut
+const eventTimeStr = ref('20:00')
 
 const steps = [
     { title: 'Media', icon: Camera },
@@ -29,7 +45,8 @@ const form = ref({
     title: '',
     promoText: '',
     description: '',
-    date: new Date().toISOString().slice(0, 16),
+    category: '',
+    date: `${new Date(Date.now() + 86400000).toISOString().slice(0, 10)}T20:00`,
     endDate: '',
     image: '',
     preview: '',
@@ -39,11 +56,19 @@ const form = ref({
     address: '',
     city: 'Abidjan',
     district: '',
+    coords: null,
     organizerPhone: userStore.user?.phone || '',
+    musicTitle: '',
+    backgroundMusic: '',
     ticketingEnabled: false,
     ticketPrice: 0,
     ticketCapacity: null
 })
+
+// Sync date+heure dans form.date
+watch([eventDateStr, eventTimeStr], ([d, t]) => {
+    if (d && t) form.value.date = `${d}T${t}`
+}, { immediate: true })
 
 const tagList = computed(() => {
     return tagsInput.value
@@ -89,14 +114,26 @@ const handleFileChange = async (e) => {
     }
 }
 
-const useCurrentPosition = () => {
-    if (coords.value.latitude === Infinity) {
-        resume()
-        return
-    }
-    form.value.coords = {
-        lat: coords.value.latitude,
-        lng: coords.value.longitude
+const useCurrentPosition = async () => {
+    gpsLoading.value = true
+    gpsError.value = ''
+    try {
+        await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    form.value.coords = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+                    resolve()
+                },
+                (err) => reject(err),
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            )
+        })
+    } catch (e) {
+        gpsError.value = e.code === 1
+            ? 'Géolocalisation refusée. Activez-la dans les paramètres du navigateur.'
+            : 'Impossible de récupérer la position. Réessayez.'
+    } finally {
+        gpsLoading.value = false
     }
 }
 
@@ -120,6 +157,7 @@ const publishEvent = async () => {
         title: form.value.title || 'Evenement sans titre',
         promoText: form.value.promoText || '',
         description: form.value.description || 'Pas de description',
+        category: form.value.category || '',
         date: form.value.date,
         eventDate: form.value.date,
         endDate: form.value.endDate || null,
@@ -137,6 +175,8 @@ const publishEvent = async () => {
         organizer: organizerName.value,
         organizerName: organizerName.value,
         organizerPhone: form.value.organizerPhone || userStore.user?.phone || '',
+        musicTitle: form.value.musicTitle || '',
+        backgroundMusic: form.value.backgroundMusic || '',
         organizerId: userStore.user?.id || null,
         createdBy: userStore.user?.id || null,
         status,
@@ -221,20 +261,41 @@ onMounted(() => {
       <section v-else-if="step === 3" class="space-y-4">
         <div>
           <h2 class="text-2xl font-bold mb-2">Date et lieu</h2>
-          <p class="text-gray-400 text-sm">Ces donnees alimentent le feed geolocalise.</p>
+          <p class="text-gray-400 text-sm">Ces données alimentent le feed géolocalise.</p>
         </div>
-        <input v-model="form.date" type="datetime-local" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
-        <input v-model="form.endDate" type="datetime-local" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <!-- Date picker -->
+        <div class="space-y-1">
+          <label class="text-xs text-gray-400 font-medium">Date de l'événement</label>
+          <input v-model="eventDateStr" type="date" :min="todayStr"
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary text-white [color-scheme:dark]" />
+        </div>
+        <!-- Heure de début -->
+        <div class="space-y-1">
+          <label class="text-xs text-gray-400 font-medium">Heure de début</label>
+          <input v-model="eventTimeStr" type="time"
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary text-white [color-scheme:dark]" />
+        </div>
+        <!-- Heure de fin (optionnel) -->
+        <div class="space-y-1">
+          <label class="text-xs text-gray-400 font-medium">Heure de fin <span class="text-gray-600">(optionnel)</span></label>
+          <input v-model="form.endDate" type="datetime-local" :min="form.date"
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary text-white [color-scheme:dark]" />
+        </div>
         <input v-model="form.location" type="text" placeholder="Nom du lieu ou point de vente" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
         <input v-model="form.address" type="text" placeholder="Adresse" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
         <div class="grid grid-cols-2 gap-3">
           <input v-model="form.city" type="text" placeholder="Ville" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
           <input v-model="form.district" type="text" placeholder="Quartier" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
         </div>
-        <button @click="useCurrentPosition" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 flex items-center justify-center gap-2 text-gray-300 hover:border-primary transition">
-          <MapPin class="w-4 h-4" />
-          Utiliser ma position GPS
+        <!-- Bouton GPS -->
+        <button @click="useCurrentPosition" :disabled="gpsLoading"
+          class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 flex items-center justify-center gap-2 text-gray-300 hover:border-primary transition disabled:opacity-60">
+          <MapPin class="w-4 h-4" :class="gpsLoading ? 'animate-pulse text-primary' : ''" />
+          <span v-if="gpsLoading">Localisation en cours...</span>
+          <span v-else-if="form.coords">GPS : {{ form.coords.lat.toFixed(4) }}, {{ form.coords.lng.toFixed(4) }}</span>
+          <span v-else>Utiliser ma position GPS</span>
         </button>
+        <p v-if="gpsError" class="text-red-400 text-xs px-1">{{ gpsError }}</p>
         <input v-model="form.organizerPhone" type="tel" placeholder="Telephone WhatsApp organisateur" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
       </section>
 
@@ -242,6 +303,21 @@ onMounted(() => {
         <div>
           <h2 class="text-2xl font-bold mb-2">Description et tags</h2>
           <p class="text-gray-400 text-sm">Les tags servent aux filtres et au ciblage publicitaire.</p>
+        </div>
+        <!-- Catégorie -->
+        <div class="space-y-1">
+          <label class="text-xs text-gray-400 font-medium">Catégorie</label>
+          <select v-model="form.category" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary text-white">
+            <option value="">Choisir une catégorie...</option>
+            <option value="musique">🎵 Musique</option>
+            <option value="dj">🎧 DJ / Club</option>
+            <option value="brunch">🥂 Brunch</option>
+            <option value="sport">⚽ Sport</option>
+            <option value="art">🎨 Art &amp; Culture</option>
+            <option value="comedie">😂 Comédie</option>
+            <option value="afterwork">🍹 Afterwork</option>
+            <option value="festival">🂪 Festival</option>
+          </select>
         </div>
         <textarea v-model="form.description" rows="5" placeholder="Ambiance, programme, infos pratiques..." class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary resize-none"></textarea>
         <input v-model="tagsInput" type="text" placeholder="Tags separes par des virgules" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />

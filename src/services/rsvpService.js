@@ -148,6 +148,55 @@ export async function countRsvpsForEvent(eventId) {
 }
 
 /**
+ * Génère un payload QR pour un RSVP (événement gratuit).
+ * Le QR contient : type rsvp, eventId, phone, pseudo, nonce unique.
+ */
+export function genRsvpQrPayload(eventId, pseudo, phone) {
+    const r = crypto.getRandomValues(new Uint8Array(8))
+    const nonce = [...r].map(b => b.toString(16).padStart(2, '0')).join('')
+    return JSON.stringify({ t: 'rsvp', eid: eventId, phone, pseudo, n: nonce })
+}
+
+/**
+ * Check-in RSVP via QR code (scan à l'entrée de l'événement).
+ * Retourne { ok, pseudo, phone } ou { ok: false, reason }
+ */
+export async function checkInRsvpByQr(qrPayload) {
+    try {
+        const data = JSON.parse(qrPayload)
+        if (!data || data.t !== 'rsvp') return { ok: false, reason: 'QR invalide (type attendu: rsvp)' }
+        const { eid: eventId, phone, pseudo } = data
+        if (!eventId || !phone) return { ok: false, reason: 'QR corrompu (données manquantes)' }
+
+        // Chercher dans event_attendances
+        const { data: rows, error } = await supabase
+            .from('event_attendances')
+            .select('*')
+            .eq('event_id', eventId)
+            .eq('phone', phone)
+            .maybeSingle()
+
+        if (error || !rows) {
+            return { ok: false, reason: 'Participant non trouvé dans la liste' }
+        }
+        if (rows.checked_in) {
+            return { ok: false, reason: 'QR déjà utilisé — accès refusé' }
+        }
+
+        // Marquer check-in
+        await supabase
+            .from('event_attendances')
+            .update({ checked_in: true, checked_in_at: new Date().toISOString() })
+            .eq('event_id', eventId)
+            .eq('phone', phone)
+
+        return { ok: true, pseudo: rows.pseudo || pseudo, phone: rows.phone || phone, type: 'rsvp' }
+    } catch (e) {
+        return { ok: false, reason: `QR invalide: ${e.message}` }
+    }
+}
+
+/**
  * Recupere les evenements proches via RPC PostGIS.
  * Fallback cote client si RPC indisponible.
  */
