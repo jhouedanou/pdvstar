@@ -10,6 +10,7 @@ import {
     getUserPasses as supaGetUserPasses,
     PASS_CATALOG
 } from '../services/supabase'
+import { loginOneSignal, logoutOneSignal } from '../services/pushService'
 
 export const useUserStore = defineStore('user', () => {
     // Load current session from localStorage (pointer to logged in user)
@@ -182,6 +183,8 @@ export const useUserStore = defineStore('user', () => {
         isLoading.value = false
         // Charger le pass actif après login
         loadActivePass()
+        // Lier OneSignal pour push ciblé
+        if (user.value?.id) loginOneSignal(user.value.id)
         return user.value
     }
 
@@ -269,11 +272,13 @@ export const useUserStore = defineStore('user', () => {
         activePass.value = null
         passHistory.value = []
         localStorage.removeItem('pdvstar_session_user')
+        logoutOneSignal()
     }
 
-    // Si l'utilisateur est déjà connecté, charger son pass
+    // Si l'utilisateur est déjà connecté, charger son pass + lier OneSignal
     if (user.value) {
         loadActivePass()
+        if (user.value.id) loginOneSignal(user.value.id)
     }
 
     return {

@@ -98,7 +98,8 @@ export async function fetchTicketsForBuyer(buyerId) {
  */
 export async function buildQrDataUrl(token) {
     try {
-        const QR = await import('qrcode')
+        const modName = 'qrcode'
+        const QR = await import(/* @vite-ignore */ modName)
         return await QR.toDataURL(token, { width: 320, margin: 1, errorCorrectionLevel: 'H' })
     } catch (e) {
         console.warn('⚠️ qrcode npm absent, fallback URL externe:', e?.message)

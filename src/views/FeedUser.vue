@@ -4,7 +4,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Map as MapIcon, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
 import OrganizerProfile from '../components/OrganizerProfile.vue'
@@ -13,10 +13,11 @@ import ConnectionBanner from '../components/ConnectionBanner.vue'
 import { useConnectionStatus } from '../composables/useConnectionStatus'
 import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
-import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
+import { sendAttendanceNotification, sendWhatsAppLocation } from '../services/greenApiService'
 import { db } from '../services/db'
 import { fetchActiveAds } from '../services/supabase'
-import { createRsvp, deleteRsvp, markRsvpNotified } from '../services/rsvpService'
+import { createRsvp, markRsvpNotified } from '../services/rsvpService'
+import { trackEventInteraction } from '../services/interactionService'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -40,6 +41,23 @@ const currentSlideIndex = ref(0)
 const isMuted = ref(false)
 
 const appName = 'Babi Vibes'
+
+const feedDateFilter = ref('all')
+const feedPriceFilter = ref('all')
+const feedNearMeOnly = ref(false)
+
+const feedDateOptions = [
+    { v: 'all', l: 'Tous' },
+    { v: 'today', l: "Aujourd'hui" },
+    { v: 'weekend', l: 'Week-end' },
+    { v: 'this_week', l: 'Semaine' }
+]
+
+const feedPriceOptions = [
+    { v: 'all', l: 'Prix' },
+    { v: 'free', l: 'Gratuit' },
+    { v: 'paid', l: 'Payant' }
+]
 
 // Splash screen : simule la première interaction pour débloquer l'autoplay audio
 const hasInteracted = ref(false)
@@ -110,6 +128,44 @@ const computeRelevanceScore = (event) => {
     return score
 }
 
+const isWithinFeedDateFilter = (event) => {
+    if (feedDateFilter.value === 'all') return true
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const eventDate = new Date(event.date)
+
+    if (feedDateFilter.value === 'today') {
+        return eventDate >= today && eventDate < tomorrow
+    }
+
+    if (feedDateFilter.value === 'weekend') {
+        const day = eventDate.getDay()
+        return day === 0 || day === 6
+    }
+
+    if (feedDateFilter.value === 'this_week') {
+        const endOfWeek = new Date(today)
+        endOfWeek.setDate(endOfWeek.getDate() + (7 - endOfWeek.getDay()))
+        endOfWeek.setHours(23, 59, 59, 999)
+        return eventDate >= today && eventDate <= endOfWeek
+    }
+
+    return true
+}
+
+const matchesFeedFilters = (event) => {
+    if (!isWithinFeedDateFilter(event)) return false
+    if (feedPriceFilter.value === 'free' && (event.ticketingEnabled || event.price > 0 || event.ticketPrice > 0)) return false
+    if (feedPriceFilter.value === 'paid' && !(event.ticketingEnabled || event.price > 0 || event.ticketPrice > 0)) return false
+    if (feedNearMeOnly.value) {
+        if (!coords.value?.latitude || !event.coords?.lat) return false
+        return getDistanceFromLatLonInKm(coords.value.latitude, coords.value.longitude, event.coords.lat, event.coords.lng) <= 10
+    }
+    return true
+}
+
 // Mix events and ads (every 5 events, insert an ad)
 const feedItems = computed(() => {
     const items = []
@@ -123,6 +179,7 @@ const feedItems = computed(() => {
             if (e.status && e.status !== 'approved') return false
             return true
         })
+        .filter(matchesFeedFilters)
 
     // Séparer : events à venir vs passés
     const upcomingEvents = approvedEvents.filter(e => new Date(e.date) >= today)
@@ -276,6 +333,7 @@ const handleWheel = (e) => {
                 behavior: 'smooth'
             })
             syncYouTubePlayback()
+            trackCurrentFeedEvent()
         }
         
         // Reset scrolling flag after animation
@@ -325,6 +383,8 @@ onMounted(async () => {
         feedContainer.value.addEventListener('scroll', handleFeedScroll, { passive: true })
     }
 
+    nextTick(() => trackCurrentFeedEvent())
+
     // La première slide a autoplay=1, les autres autoplay=0
     // syncYouTubePlayback sera appelé au scroll pour gérer les transitions
 })
@@ -364,6 +424,18 @@ const syncYouTubePlayback = () => {
     })
 }
 
+const trackCurrentFeedEvent = () => {
+    const item = feedItems.value[currentSlideIndex.value]
+    if (!item || item.type !== 'event') return
+
+    trackEventInteraction({
+        eventId: item.data.id,
+        profileId: userStore.user?.id || null,
+        type: 'view',
+        metadata: { source: 'feed' }
+    }).catch(() => {})
+}
+
 const handleFeedScroll = () => {
     if (!feedContainer.value) return
     const slideHeight = feedContainer.value.clientHeight
@@ -372,6 +444,7 @@ const handleFeedScroll = () => {
     if (newIndex !== currentSlideIndex.value) {
         currentSlideIndex.value = newIndex
         syncYouTubePlayback()
+        trackCurrentFeedEvent()
     }
 }
 
@@ -555,7 +628,7 @@ const initMap = () => {
 
         userMarker = L.marker([coords.value.latitude, coords.value.longitude], { icon: userIcon })
             .addTo(mapInstance)
-            .bindPopup('<div class="text-black text-center font-bold text-xs">📍 Vous êtes ici</div>')
+            .bindPopup('<div class="text-black text-center font-bold text-xs">Vous etes ici</div>')
     }
 
     // Add Markers from Store
@@ -567,7 +640,7 @@ const initMap = () => {
             // Custom icon for events
             const eventIcon = L.divIcon({
                 className: 'event-marker',
-                html: `<div style="background: #FFD700; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">🎉</div>`,
+                html: `<div style="background: #FFD700; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>`,
                 iconSize: [32, 32],
                 iconAnchor: [16, 16]
             })
@@ -587,7 +660,7 @@ const initMap = () => {
         }
     })
 
-    console.log(`📍 ${markerCount} événements affichés sur la carte sur ${eventStore.events.length} total`)
+    console.log(`${markerCount} evenements affiches sur la carte sur ${eventStore.events.length} total`)
 
     // If event is selected and user location is available, show route
     if (selectedMapEvent.value && selectedMapEvent.value.coords && coords.value.latitude !== Infinity) {
@@ -792,11 +865,28 @@ const handleJyVais = async (event) => {
         return
     }
 
+    if (event.isRegistered) {
+        messageSuccess.value = 'Participation deja enregistree.'
+        setTimeout(() => {
+            messageSuccess.value = ''
+        }, 3000)
+        return
+    }
+
+    await trackEventInteraction({
+        eventId: event.id,
+        profileId: userStore.user?.id || null,
+        type: 'click_going',
+        metadata: { source: 'feed' },
+        dedupe: false
+    }).catch(() => {})
+
     // Toggle registration state persistent
     if (!event.isRegistered) {
         await eventStore.updateEvent(event.id, {
             isRegistered: true,
-            participantCount: event.participantCount + 1
+            participantCount: (event.participantCount || 0) + 1,
+            clickCount: (event.clickCount || 0) + 1
         })
 
         // Persist structured RSVP (Phase 1)
@@ -808,21 +898,30 @@ const handleJyVais = async (event) => {
                 userId: userStore.user.id,
                 pseudo,
                 phone: userStore.user.phone,
-                source: 'app'
+                city: userStore.user.city || event.city || event.ville || null,
+                district: userStore.user.district || event.district || event.quartier || null,
+                latitude: userStore.user.latitude || null,
+                longitude: userStore.user.longitude || null,
+                source: 'feed'
             })
         } catch (err) {
             console.error('RSVP persist failed', err)
         }
 
-        messageSuccess.value = `✅ Inscription confirmée !`
+        messageSuccess.value = 'Participation confirmee.'
 
         // Send WhatsApp Notification
         if (userStore.user && userStore.user.phone) {
             sendingMessage.value = true
             try {
-                await sendEventNotification(event, pseudo, userStore.user.phone)
-                if (rsvp?.id) markRsvpNotified(rsvp.id)
-                messageSuccess.value = `✅ Inscription confirmée ! Notification envoyée 📱`
+                const result = await sendAttendanceNotification(event, {
+                    ...userStore.user,
+                    pseudo,
+                    city: userStore.user.city || event.city || event.ville || '',
+                    district: userStore.user.district || event.district || event.quartier || ''
+                })
+                if (result?.success && rsvp?.id) markRsvpNotified(rsvp.id)
+                if (result?.success) messageSuccess.value = 'Participation confirmee. Organisateur notifie.'
             } catch (err) {
                 console.error('Notification failed', err)
             } finally {
@@ -830,16 +929,6 @@ const handleJyVais = async (event) => {
             }
         }
 
-    } else {
-        // Toggle off
-        await eventStore.updateEvent(event.id, {
-            isRegistered: false,
-            participantCount: Math.max(0, event.participantCount - 1)
-        })
-        if (userStore.user?.phone) {
-            deleteRsvp(event.id, userStore.user.phone).catch(() => {})
-        }
-        messageSuccess.value = `Inscription annulée.`
     }
     
     // Clear success message after 3 seconds
@@ -885,7 +974,7 @@ const sendItineraryWhatsApp = async (event) => {
             event.title,
             event.location
         )
-        messageSuccess.value = '✅ Itinéraire envoyé sur WhatsApp ! 🗺️'
+        messageSuccess.value = 'Itineraire envoye sur WhatsApp.'
     } catch (err) {
         console.error('Failed to send location', err)
         messageError.value = 'Erreur lors de l\'envoi de l\'itinéraire.'
@@ -932,21 +1021,40 @@ const openVTC = (provider) => {
 
 const handleShare = async (event) => {
     try {
+        trackEventInteraction({
+            eventId: event.id,
+            profileId: userStore.user?.id || null,
+            type: 'share',
+            metadata: { source: 'feed' },
+            dedupe: false
+        }).catch(() => {})
+
         if (navigator.share) {
             await navigator.share({
                 title: event.title,
-                text: `Viens on va là-bas : ${event.title} à ${event.location} ! 🚀 #BabiVibes`,
+                text: `Viens on va la-bas : ${event.title} a ${event.location}. #BabiVibes`,
                 url: window.location.href
             })
         } else {
             // Fallback
-            await navigator.clipboard.writeText(`Viens on va là-bas : ${event.title} à ${event.location} ! 🚀`)
-            messageSuccess.value = "Lien copié !"
+            await navigator.clipboard.writeText(`Viens on va la-bas : ${event.title} a ${event.location}.`)
+            messageSuccess.value = "Lien copie."
             setTimeout(() => messageSuccess.value = '', 3000)
         }
     } catch (err) {
         console.log('Share canceled', err)
     }
+}
+
+const handleReservationClick = async (event) => {
+    await trackEventInteraction({
+        eventId: event.id,
+        profileId: userStore.user?.id || null,
+        type: 'reservation_click',
+        metadata: { source: 'feed' },
+        dedupe: false
+    }).catch(() => {})
+    router.push(`/billet/${event.id}`)
 }
 
 // --- YouTube Helper ---
@@ -1029,7 +1137,7 @@ const saveProfileEdit = async () => {
             name: profileEditForm.value.name,
             email: profileEditForm.value.email
         })
-        profileEditSuccess.value = '✅ Profil mis à jour !'
+            profileEditSuccess.value = 'Profil mis a jour.'
         setTimeout(() => {
             profileEditSuccess.value = ''
             showProfileEdit.value = false
@@ -1083,7 +1191,7 @@ const handleBecomeOrganizer = async () => {
 
     if (success) {
         showOrganizerForm.value = false
-        messageSuccess.value = '🎉 Vous êtes maintenant organisateur ! Redirection...'
+        messageSuccess.value = 'Vous etes maintenant organisateur. Redirection...'
         setTimeout(() => {
             messageSuccess.value = ''
             router.push('/admin/dashboard')
@@ -1101,7 +1209,7 @@ const myOrganizerEvents = computed(() => {
 const handleDeleteEvent = async (eventId) => {
     await eventStore.deleteEvent(eventId)
     deleteConfirmId.value = null
-    messageSuccess.value = '✅ Événement supprimé'
+    messageSuccess.value = 'Evenement supprime.'
     setTimeout(() => messageSuccess.value = '', 3000)
 }
 </script>
@@ -1121,15 +1229,15 @@ const handleDeleteEvent = async (eventId) => {
         class="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center cursor-pointer select-none"
       >
         <div class="flex flex-col items-center gap-6 animate-pulse">
-          <div class="text-6xl">🎉</div>
+          <img src="/appIcon.svg" alt="Babi Vibes" class="w-24 h-24" />
           <h1 class="text-4xl font-black text-primary tracking-tight">BABI VIBES</h1>
           <p class="text-gray-400 text-sm">La nightlife d'Abidjan à portée de main</p>
         </div>
         <div class="mt-12 flex flex-col items-center gap-3">
           <div class="bg-primary/20 border border-primary/40 text-primary px-8 py-3 rounded-full text-lg font-bold animate-bounce">
-            👆 Toucher pour entrer
+            Toucher pour entrer
           </div>
-          <p class="text-gray-600 text-xs mt-2">🎵 La musique sera activée</p>
+          <p class="text-gray-600 text-xs mt-2">La musique sera activee</p>
         </div>
       </div>
     </Transition>
@@ -1145,9 +1253,39 @@ const handleDeleteEvent = async (eventId) => {
                 <span class="text-[10px] font-normal">Carte</span>
             </button>
             <div class="text-white text-xl font-bold border-b-2 border-primary pb-0.5 shadow-lg">
-                BABI VIBES ✨
+                BABI VIBES
             </div>
        </div>
+    </div>
+
+    <div class="absolute top-28 left-0 right-0 z-20 px-3 pointer-events-auto">
+      <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        <button
+          v-for="opt in feedDateOptions"
+          :key="opt.v"
+          @click="feedDateFilter = opt.v"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
+          :class="feedDateFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
+        >
+          {{ opt.l }}
+        </button>
+        <button
+          v-for="opt in feedPriceOptions"
+          :key="opt.v"
+          @click="feedPriceFilter = opt.v"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
+          :class="feedPriceFilter === opt.v ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
+        >
+          {{ opt.l }}
+        </button>
+        <button
+          @click="feedNearMeOnly = !feedNearMeOnly"
+          class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-bold border backdrop-blur-md transition"
+          :class="feedNearMeOnly ? 'bg-primary text-black border-primary' : 'bg-black/45 text-white border-white/15'"
+        >
+          Proche
+        </button>
+      </div>
     </div>
 
     <!-- MAIN FEED VIEW -->
@@ -1254,6 +1392,17 @@ const handleDeleteEvent = async (eventId) => {
               <span class="text-[10px] font-bold">{{ item.data.participantCount }}</span>
             </button>
 
+            <!-- Phase 3 : Bouton Acheter billet si billetterie activée -->
+            <button
+              v-if="item.data.ticketingEnabled"
+              @click="handleReservationClick(item.data)"
+              class="action-button flex flex-col items-center gap-1 group">
+              <div class="w-10 h-10 rounded-full bg-primary/90 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition shadow-lg">
+                <Ticket class="w-6 h-6 text-black" />
+              </div>
+              <span class="action-button-text text-[10px] font-bold drop-shadow-md">{{ item.data.ticketPrice || item.data.price || 0 }} CFA</span>
+            </button>
+
             <button @click="openMap(item.data.location, item.data)" class="action-button flex flex-col items-center gap-1 group">
               <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
                  <MapPin class="w-6 h-6 text-white"/>
@@ -1279,7 +1428,7 @@ const handleDeleteEvent = async (eventId) => {
                <VolumeX v-if="isMuted" class="w-6 h-6 text-red-400" />
                <Volume2 v-else class="w-6 h-6 text-primary" />
              </div>
-             <span class="action-button-text text-xs font-semibold drop-shadow-md">{{ isMuted ? 'Muet' : '🎵 Son' }}</span>
+             <span class="action-button-text text-xs font-semibold drop-shadow-md">{{ isMuted ? 'Muet' : 'Son' }}</span>
            </button>
 
            <!-- Spinning Disc (TikTok Vibe) -->
@@ -1297,7 +1446,7 @@ const handleDeleteEvent = async (eventId) => {
         <div class="event-content relative z-10 w-full pl-4 pr-16 pb-6 mb-20 flex flex-col items-start space-y-2.5 pointer-events-none">
           <!-- Promo Label (dynamique depuis la DB) -->
           <div v-if="item.data.promoText" class="animate-pulse bg-secondary/90 backdrop-blur-md text-white px-3 py-1 rounded-r-full rounded-tl-full text-sm font-black uppercase tracking-wider shadow-lg transform -rotate-1 origin-bottom-left inline-block">
-            🔥 {{ item.data.promoText }}
+            {{ item.data.promoText }}
           </div>
 
           <!-- Premium Price Tag -->
@@ -1315,8 +1464,8 @@ const handleDeleteEvent = async (eventId) => {
                 {{ getDateDisplayText(item.data.date) }}
                 à {{ new Date(item.data.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) }}
               </span>
-              <span v-if="getDateLabel(item.data.date) === 'today'" class="bg-red-500/40 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse">🔴 AUJOURD'HUI</span>
-              <span v-else-if="getDateLabel(item.data.date) === 'tomorrow'" class="bg-orange-500/40 text-orange-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">⏰ DEMAIN</span>
+              <span v-if="getDateLabel(item.data.date) === 'today'" class="bg-red-500/40 text-red-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-pulse">AUJOURD'HUI</span>
+              <span v-else-if="getDateLabel(item.data.date) === 'tomorrow'" class="bg-orange-500/40 text-orange-300 text-[10px] px-1.5 py-0.5 rounded-full font-bold">DEMAIN</span>
             </div>
             <div class="flex items-center text-gray-200 font-medium text-sm gap-2">
                 <span class="flex items-center text-primary"><MapPin class="w-4 h-4 mr-0.5"/> {{ item.data.location }}</span>
@@ -1333,7 +1482,7 @@ const handleDeleteEvent = async (eventId) => {
           <!-- Features Tags -->
           <div v-if="item.data.features?.length" class="flex flex-wrap gap-1.5 w-[85%]">
             <span v-for="feature in item.data.features" :key="feature" class="bg-white/20 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full font-medium">
-                ✨ {{ feature }}
+                {{ feature }}
             </span>
           </div>
 
@@ -1341,8 +1490,8 @@ const handleDeleteEvent = async (eventId) => {
           <div class="music-ticker flex items-center gap-2 w-[70%] overflow-hidden pointer-events-auto">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 fill-white flex-shrink-0" :class="item.data.backgroundMusic ? 'animate-spin-slow' : 'animate-pulse'" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
               <div class="whitespace-nowrap animate-marquee text-xs font-medium">
-                  <span v-if="item.data.backgroundMusic" class="mr-4">🎵 {{ item.data.musicTitle || 'Musique de fond' }}</span>
-                  <span v-if="item.data.backgroundMusic" class="mr-4">🎵 {{ item.data.musicTitle || 'Musique de fond' }}</span>
+                  <span v-if="item.data.backgroundMusic" class="mr-4">{{ item.data.musicTitle || 'Musique de fond' }}</span>
+                  <span v-if="item.data.backgroundMusic" class="mr-4">{{ item.data.musicTitle || 'Musique de fond' }}</span>
                   <span v-if="!item.data.backgroundMusic" class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
                   <span v-if="!item.data.backgroundMusic" class="mr-4">Son original - DJ Mombassa (Kinshasa Vibes)</span>
               </div>
@@ -1358,7 +1507,7 @@ const handleDeleteEvent = async (eventId) => {
         <div v-if="showMap" class="fixed inset-0 bg-black z-50 flex flex-col">
             <!-- Modal Header -->
             <div class="absolute top-0 left-0 right-0 z-[1000] p-4 pt-12 flex justify-between items-center bg-gradient-to-b from-black/90 to-transparent pointer-events-none">
-                <h2 class="text-xl font-bold text-white pl-2 pointer-events-auto">Autour de moi 🌍</h2>
+                <h2 class="text-xl font-bold text-white pl-2 pointer-events-auto">Autour de moi</h2>
                 <button @click="showMap = false" class="bg-black/50 backdrop-blur-md p-2 rounded-full text-white pointer-events-auto hover:bg-white/20 transition">
                     <X class="w-6 h-6" />
                 </button>
@@ -1371,11 +1520,11 @@ const handleDeleteEvent = async (eventId) => {
             <transition name="fade">
                 <div v-if="showRouteInfo" class="absolute top-20 left-1/2 -translate-x-1/2 z-[500] bg-primary text-black px-4 py-2 rounded-full shadow-lg pointer-events-auto flex items-center gap-3">
                     <div class="flex items-center gap-1">
-                        <span class="text-xs font-bold">📍 {{ routeInfo.distance }}</span>
+                        <span class="text-xs font-bold">{{ routeInfo.distance }}</span>
                     </div>
                     <div class="w-[1px] h-4 bg-black/20"></div>
                     <div class="flex items-center gap-1">
-                        <span class="text-xs font-bold">🕐 {{ routeInfo.duration }}</span>
+                        <span class="text-xs font-bold">{{ routeInfo.duration }}</span>
                     </div>
                     <button @click="toggleRoute" class="ml-2 bg-black/20 hover:bg-black/30 p-1 rounded-full transition">
                         <X class="w-3 h-3" />
@@ -1463,7 +1612,7 @@ const handleDeleteEvent = async (eventId) => {
                                 @click="sendItineraryWhatsApp(selectedMapEvent)"
                                 class="col-span-2 flex items-center justify-center gap-2 py-3 rounded-xl bg-green-600/20 text-green-500 font-bold hover:bg-green-600/30 transition active:scale-95 border border-green-600/50 mt-2"
                             >
-                                🗺️ Envoyer sur WhatsApp
+                                Envoyer sur WhatsApp
                             </button>
                         </div>
                     </div>
@@ -1563,7 +1712,7 @@ const handleDeleteEvent = async (eventId) => {
                         class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold transition border"
                         :class="searchTagFilter === tag ? 'bg-purple-500 text-white border-purple-500' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700'"
                     >
-                        ✨ {{ tag }}
+                        {{ tag }}
                     </button>
                 </div>
             </div>
@@ -1646,7 +1795,7 @@ const handleDeleteEvent = async (eventId) => {
                        <div class="flex-1 min-w-0">
                          <h3 class="font-bold text-lg text-gray-900 dark:text-white truncate">{{ userStore.user?.name || 'Visiteur' }}</h3>
                          <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ userStore.user?.email || 'Pas d\'email' }}</p>
-                         <p class="text-xs text-gray-400 dark:text-gray-500">📱 {{ userStore.user?.phone || 'Non renseigné' }}</p>
+                         <p class="text-xs text-gray-400 dark:text-gray-500">{{ userStore.user?.phone || 'Non renseigné' }}</p>
                        </div>
                        <button @click="openProfileEdit" class="p-2 bg-gray-100 dark:bg-gray-800 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition flex-shrink-0">
                          <Edit class="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -1709,39 +1858,64 @@ const handleDeleteEvent = async (eventId) => {
 
                      <!-- Quick Actions -->
                      <div class="border-t border-gray-200 dark:border-gray-800 p-3 flex flex-col gap-2">
-                       <!-- Admin Dashboard Button -->
-                       <button 
+                       <!-- Espace Admin -->
+                       <button
                          v-if="adminStore.isAuthenticated"
-                         @click="router.push('/admin/dashboard')" 
+                         @click="router.push('/admin/dashboard')"
                          class="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-red-500/20"
                        >
                          <Shield class="w-5 h-5" />
-                         🛡️ Admin Dashboard
+                         Espace Admin
                        </button>
-                       <!-- Admin Login Button (non-admin) -->
-                       <button 
+                       <button
                          v-else
-                         @click="router.push('/admin')" 
+                         @click="router.push('/admin')"
                          class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                        >
                          <LogIn class="w-4 h-4" />
                          Connexion Admin
                        </button>
-                       <!-- Organizer Quick Actions -->
+
+                       <!-- Espace Organisateur -->
+                       <button
+                         v-if="userStore.isOrganizer"
+                         @click="router.push('/pro')"
+                         class="w-full bg-primary/10 hover:bg-primary/20 text-primary font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-primary/20"
+                       >
+                         <Store class="w-5 h-5" />
+                         Espace Organisateur
+                       </button>
+                       <button
+                         v-else
+                         @click="router.push('/pro')"
+                         class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                       >
+                         <Store class="w-4 h-4" />
+                         Devenir Organisateur
+                       </button>
+
+                       <!-- Sous-actions organizer -->
                        <div v-if="userStore.isOrganizer" class="flex gap-2">
-                         <button 
-                           @click="router.push('/admin/dashboard')" 
-                           class="flex-1 bg-primary/10 hover:bg-primary/20 text-primary font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm"
+                         <button
+                           @click="router.push('/pro/create')"
+                           class="flex-1 bg-primary/10 hover:bg-primary/20 text-primary font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                          >
-                           <Calendar class="w-4 h-4" />
-                           Gérer mes événements
+                           <Plus class="w-4 h-4" />
+                           Créer event
                          </button>
-                         <button 
-                           @click="router.push('/admin/ads')" 
-                           class="flex-1 bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm"
+                         <button
+                           @click="router.push('/admin/ads')"
+                           class="flex-1 bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
                          >
                            <Store class="w-4 h-4" />
-                           Mes publicités
+                           Mes pubs
+                         </button>
+                         <button
+                           @click="router.push('/billet/scan')"
+                           class="flex-1 bg-green-500/10 hover:bg-green-500/20 text-green-500 font-medium py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-xs"
+                         >
+                           <ScanLine class="w-4 h-4" />
+                           Scan QR
                          </button>
                        </div>
                      </div>
@@ -1816,7 +1990,7 @@ const handleDeleteEvent = async (eventId) => {
                        </div>
                        <div class="flex-1 min-w-0">
                          <h4 class="font-bold text-gray-900 dark:text-white text-sm truncate">{{ event.title }}</h4>
-                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">📅 {{ new Date(event.date).toLocaleDateString('fr-FR') }} • 📍 {{ event.location?.split(',')[0] }}</p>
+                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ new Date(event.date).toLocaleDateString('fr-FR') }} - {{ event.location?.split(',')[0] }}</p>
                          <div class="flex items-center gap-1.5 mt-1.5">
                            <span class="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full font-medium">{{ event.participantCount || 0 }} inscrits</span>
                            <span v-if="event.isPremium" class="text-[10px] bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full font-medium">Premium</span>
@@ -1907,7 +2081,7 @@ const handleDeleteEvent = async (eventId) => {
                            class="w-full bg-primary hover:bg-primary/90 disabled:bg-gray-700 text-black font-bold py-3 rounded-xl transition hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
                          >
                            <Store class="w-5 h-5" />
-                           <span v-if="!userStore.isLoading">Devenir organisateur 🚀</span>
+                           <span v-if="!userStore.isLoading">Devenir organisateur</span>
                            <span v-else>Création en cours...</span>
                          </button>
                        </div>
@@ -1935,7 +2109,7 @@ const handleDeleteEvent = async (eventId) => {
                             <h4 class="font-bold text-gray-900 dark:text-white line-clamp-1">{{ event.title }}</h4>
                             <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
                                 <span>📅 {{ new Date(event.date).toLocaleDateString() }}</span>
-                                <span>📍 {{ event.location.split(',')[0] }}</span>
+                                <span>{{ event.location.split(',')[0] }}</span>
                             </div>
                             <span class="inline-block mt-2 text-[10px] bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full font-bold">Confirmé</span>
                         </div>
@@ -2103,7 +2277,7 @@ const handleDeleteEvent = async (eventId) => {
 
             <!-- STEP 4 : Succès -->
             <div v-else-if="passPurchaseStep === 'success'" class="text-center py-10">
-              <div class="text-6xl mb-4">🎉</div>
+              <div class="text-6xl mb-4">OK</div>
               <h3 class="text-2xl font-black text-white mb-2">Pass activé !</h3>
               <p class="text-gray-400 mb-6">Votre Pass {{ PASS_CATALOG[selectedPassType]?.name }} est maintenant actif.</p>
               <div class="bg-green-500/20 text-green-400 p-4 rounded-xl inline-flex items-center gap-2 font-bold text-sm mb-6">
@@ -2177,7 +2351,7 @@ const handleDeleteEvent = async (eventId) => {
                 class="w-full bg-primary text-black font-bold py-2.5 px-4 rounded-xl hover:bg-primary/90 transition active:scale-95 flex items-center justify-center gap-2"
             >
                 <Heart class="w-4 h-4" />
-                <span>J'y vais ! 🎉</span>
+                <span>J'y vais</span>
             </button>
         </div>
     </Transition>
@@ -2236,7 +2410,7 @@ const handleDeleteEvent = async (eventId) => {
                           @click="sendItineraryWhatsApp(selectedMapEvent); showGoogleMapsModal = false"
                           class="flex-1 bg-green-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-700 transition active:scale-95 flex items-center justify-center gap-2"
                       >
-                          <span>📱</span>
+                          <span>Tel.</span>
                           WhatsApp
                       </button>
                     </div>
@@ -2258,7 +2432,7 @@ const handleDeleteEvent = async (eventId) => {
                           @click="openVTC('waze')"
                           class="flex-1 bg-blue-500 text-white font-bold py-2.5 px-3 rounded-xl hover:bg-blue-600 transition active:scale-95 flex items-center justify-center gap-2 text-sm"
                       >
-                          🗺️ Waze
+                          Waze
                       </button>
                     </div>
                     <button

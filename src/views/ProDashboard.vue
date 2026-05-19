@@ -9,9 +9,10 @@ import UserProfileModal from '../components/UserProfileModal.vue'
 import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, MapPin,
   Check, X, Loader2, Store, Megaphone, Clock,
-  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown
+  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
+import { fetchEventStats } from '../services/statsService'
 
 const router = useRouter()
 const eventStore = useEventStore()
@@ -89,6 +90,14 @@ const myEvents = computed(() => {
   })
 })
 
+// Stats par event (RSVP + tickets) - chargé à la demande
+const eventStats = ref({})  // { [eventId]: { rsvpCount, ticketsSold, revenue, ... } }
+const loadStatsFor = async (eventId) => {
+  if (eventStats.value[eventId]) return
+  const s = await fetchEventStats(eventId)
+  eventStats.value = { ...eventStats.value, [eventId]: s }
+}
+
 const filteredEvents = computed(() => {
   let list = [...myEvents.value]
   if (statusFilter.value !== 'all') {
@@ -130,7 +139,7 @@ const hasReachedQuota = computed(() => {
 // ============================
 const handleCreateEvent = () => {
   if (hasReachedQuota.value) return
-  router.push('/pro/create')
+  router.push('/organizer/events/new')
 }
 
 const handleDeleteEvent = async (id) => {
@@ -193,7 +202,7 @@ const formatDate = (dateStr) => {
             </div>
             <button type="submit" :disabled="userStore.isLoading" class="w-full bg-primary text-black font-bold py-3 rounded-xl hover:bg-primary/90 transition flex items-center justify-center gap-2">
               <Loader2 v-if="userStore.isLoading" class="w-5 h-5 animate-spin" />
-              <span v-else>Créer mon espace 🚀</span>
+              <span v-else>Creer mon espace</span>
             </button>
           </form>
           <button @click="router.push('/')" class="w-full text-gray-500 text-sm mt-4 hover:text-white transition">
@@ -280,9 +289,13 @@ const formatDate = (dateStr) => {
             <Plus class="w-5 h-5" />
             Nouvel Événement
           </button>
-          <router-link to="/admin/ads" class="bg-yellow-400 text-black font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-yellow-500 transition">
+          <router-link to="/organizer/ads" class="bg-yellow-400 text-black font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-yellow-500 transition">
             <Megaphone class="w-5 h-5" />
             Publicités
+          </router-link>
+          <router-link to="/billet/scan" class="bg-purple-500 text-white font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-purple-600 transition">
+            <ScanLine class="w-5 h-5" />
+            Scan
           </router-link>
         </div>
 
@@ -351,8 +364,26 @@ const formatDate = (dateStr) => {
                 <span>{{ event.rejectionReason }}</span>
               </div>
 
+              <!-- Stats event -->
+              <div class="flex gap-2 mb-3" @mouseenter="loadStatsFor(event.id)">
+                <button @click="loadStatsFor(event.id)" class="flex-1 bg-gray-800 text-gray-300 px-2 py-1.5 rounded-lg text-xs flex items-center justify-center gap-1">
+                  <Users class="w-3 h-3" />
+                  <span v-if="eventStats[event.id]">{{ eventStats[event.id].rsvpCount }} RSVP · {{ eventStats[event.id].ticketsSold }} billets</span>
+                  <span v-else>Voir stats</span>
+                </button>
+              </div>
+              <div v-if="eventStats[event.id]?.revenue" class="text-xs text-green-400 mb-2">
+                {{ eventStats[event.id].revenue }} CFA - commission {{ eventStats[event.id].commission }}
+              </div>
+
               <!-- Actions -->
               <div class="flex gap-2">
+                <button
+                  @click="router.push(`/organizer/events/${event.id}`)"
+                  class="flex-1 bg-gray-800 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-700 transition flex items-center justify-center gap-1"
+                >
+                  Details
+                </button>
                 <button
                   v-if="deleteConfirmId !== event.id"
                   @click="deleteConfirmId = event.id"

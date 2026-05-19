@@ -1,138 +1,146 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@vueuse/core'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { processImage } from '../utils/imageUpload'
-import { Camera, Mic, MapPin, Check, ArrowRight, Loader2, Calendar, FileText, Type, Sparkles } from 'lucide-vue-next'
-import { generateEventDescription } from '../services/aiService'
+import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, MapPin, Ticket, Type } from 'lucide-vue-next'
 
 const router = useRouter()
 const store = useEventStore()
 const userStore = useUserStore()
 const { coords, resume } = useGeolocation()
 
-// State
 const step = ref(1)
+const isSubmitting = ref(false)
 const imageError = ref('')
+const tagsInput = ref('')
+
 const steps = [
-    { title: "Photo", icon: Camera },
-    { title: "Titre", icon: Type },
-    { title: "Date", icon: Calendar },
-    { title: "Description", icon: FileText },
-    { title: "Validation", icon: Check }
+    { title: 'Media', icon: Camera },
+    { title: 'Titre', icon: Type },
+    { title: 'Lieu', icon: Calendar },
+    { title: 'Details', icon: FileText },
+    { title: 'Validation', icon: Check }
 ]
 
 const form = ref({
     title: '',
+    promoText: '',
     description: '',
-    date: new Date().toISOString().slice(0, 16), // datetime-local format
-    image: null,
-    preview: ''
+    date: new Date().toISOString().slice(0, 16),
+    endDate: '',
+    image: '',
+    preview: '',
+    mediaUrl: '',
+    mediaType: 'image',
+    location: '',
+    address: '',
+    city: 'Abidjan',
+    district: '',
+    organizerPhone: userStore.user?.phone || '',
+    ticketingEnabled: false,
+    ticketPrice: 0,
+    ticketCapacity: null
 })
 
-const isRecording = ref(false)
-const isTranscribing = ref(false)
-const isGeneratingDesc = ref(false)
-const aiError = ref('')
+const tagList = computed(() => {
+    return tagsInput.value
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+})
 
-const generateDescription = async () => {
-    if (!form.value.title) {
-        aiError.value = 'Saisis un titre avant de générer'
+const organizerName = computed(() => {
+    return userStore.user?.organizerName || userStore.user?.spaceName || userStore.user?.name || userStore.user?.pseudo || 'Organisateur'
+})
+
+const canContinue = computed(() => {
+    if (step.value === 1) return !!(form.value.preview || form.value.mediaUrl)
+    if (step.value === 2) return !!form.value.title.trim()
+    if (step.value === 3) return !!form.value.date && !!form.value.location.trim()
+    if (step.value === 4) return !!form.value.description.trim()
+    return true
+})
+
+const handleFileChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    imageError.value = ''
+    const result = await processImage(file)
+    if (!result.success) {
+        imageError.value = result.error
         return
     }
-    isGeneratingDesc.value = true
-    aiError.value = ''
-    try {
-        const desc = await generateEventDescription({
-            title: form.value.title,
-            date: form.value.date,
-            location: 'Abidjan'
-        })
-        if (desc) form.value.description = desc
-    } catch (e) {
-        aiError.value = e.message || 'Erreur génération IA'
-    } finally {
-        isGeneratingDesc.value = false
+    form.value.preview = result.data
+    form.value.image = result.data
+    form.value.mediaUrl = result.data
+    form.value.mediaType = 'image'
+}
+
+const useCurrentPosition = () => {
+    if (coords.value.latitude === Infinity) {
+        resume()
+        return
+    }
+    form.value.coords = {
+        lat: coords.value.latitude,
+        lng: coords.value.longitude
     }
 }
 
-// Step 1: Media (avec validation securisee)
-const handleFileChange = async (e) => {
-  const file = e.target.files[0]
-  if (!file) return
-  imageError.value = ''
-  const result = await processImage(file)
-  if (!result.success) {
-    imageError.value = result.error
-    return
-  }
-  form.value.image = file
-  form.value.preview = result.data
-  nextStep()
-}
-
-// Voice Logic (Generic)
-let mediaRecorder = null
-let recognition = null
-
-// Check for SpeechRecognition (better for field inputs)
-if ('webkitSpeechRecognition' in window) {
-    recognition = new window.webkitSpeechRecognition()
-    recognition.continuous = false
-    recognition.lang = 'fr-FR'
-    recognition.interimResults = false
-}
-
-const startDictation = (field) => {
-    if (recognition) {
-        isRecording.value = true
-        recognition.onresult = (event) => {
-            const text = event.results[0][0].transcript
-            form.value[field] = text
-        }
-        recognition.onend = () => {
-            isRecording.value = false
-        }
-        recognition.start()
-    } else {
-        // Fallback or simple mock for prototype
-        alert("Dictée vocale non supportée sur ce navigateur, simulation...")
-        isRecording.value = true
-        setTimeout(() => {
-            form.value[field] = field === 'title' ? "Soirée Black & White" : "Venez nombreux pour une soirée inoubliable avec DJ Snake !"
-            isRecording.value = false
-        }, 1500)
-    }
-}
-
-// Navigation
 const nextStep = () => {
-    if (step.value < steps.length) step.value++
+    if (step.value < steps.length && canContinue.value) step.value++
 }
 
 const prevStep = () => {
     if (step.value > 1) step.value--
 }
 
-// Publish
-const publishEvent = () => {
-    store.addEvent({
-        title: form.value.title || 'Événement Sans Titre',
+const publishEvent = async () => {
+    if (isSubmitting.value) return
+    isSubmitting.value = true
+
+    const lat = form.value.coords?.lat ?? (coords.value.latitude !== Infinity ? coords.value.latitude : 5.30966)
+    const lng = form.value.coords?.lng ?? (coords.value.longitude !== Infinity ? coords.value.longitude : -3.97449)
+    const status = userStore.isOrganizer ? 'pending' : 'approved'
+
+    await store.addEvent({
+        title: form.value.title || 'Evenement sans titre',
+        promoText: form.value.promoText || '',
         description: form.value.description || 'Pas de description',
         date: form.value.date,
-        image: form.value.preview,
-        location: 'Ma Position (Mobile)',
-        coords: {
-            lat: coords.value.latitude !== Infinity ? coords.value.latitude : 5.30966,
-            lng: coords.value.longitude !== Infinity ? coords.value.longitude : -3.97449
-        },
-        distance: '0 km',
+        eventDate: form.value.date,
+        endDate: form.value.endDate || null,
+        image: form.value.preview || form.value.mediaUrl,
+        mediaUrl: form.value.mediaUrl || form.value.preview,
+        mediaType: form.value.mediaType,
+        location: form.value.location,
+        locationName: form.value.location,
+        address: form.value.address,
+        city: form.value.city,
+        ville: form.value.city,
+        district: form.value.district,
+        quartier: form.value.district,
+        coords: { lat, lng },
+        organizer: organizerName.value,
+        organizerName: organizerName.value,
+        organizerPhone: form.value.organizerPhone || userStore.user?.phone || '',
+        organizerId: userStore.user?.id || null,
         createdBy: userStore.user?.id || null,
-        status: userStore.isOrganizer ? 'pending' : 'approved'
+        status,
+        tags: tagList.value,
+        features: tagList.value,
+        ticketingEnabled: form.value.ticketingEnabled,
+        isTicketingEnabled: form.value.ticketingEnabled,
+        ticketPrice: form.value.ticketingEnabled ? Number(form.value.ticketPrice) || 0 : 0,
+        ticketCapacity: form.value.ticketCapacity ? Number(form.value.ticketCapacity) : null,
+        distance: '0 km'
     })
-    router.push('/')
+
+    isSubmitting.value = false
+    router.push('/organizer')
 }
 
 onMounted(() => {
@@ -141,103 +149,150 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="h-screen bg-black flex flex-col items-center justify-between p-6 relative overflow-hidden">
-    
-    <!-- Progress Bar -->
-    <div class="w-full flex gap-1 mb-8 pt-4">
-        <div v-for="i in steps.length" :key="i" 
-             class="h-1 flex-1 rounded-full transition-all duration-300"
-             :class="i <= step ? 'bg-primary' : 'bg-gray-800'">
-        </div>
-    </div>
-
-    <!-- Steps -->
-    <div class="flex-1 w-full max-w-md flex flex-col justify-center">
-        
-        <!-- Step 1: Image -->
-        <div v-if="step === 1" class="flex flex-col items-center animate-in slide-in-from-right fade-in duration-300">
-            <h2 class="text-3xl font-bold text-white mb-2">L'affiche ? 📸</h2>
-            <p class="text-gray-400 mb-8">Montre-nous à quoi ça ressemble.</p>
-            
-            <label class="w-full aspect-square bg-gray-900 border-2 border-dashed border-gray-700 rounded-3xl flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-gray-800 transition group">
-                <div v-if="form.preview" class="w-full h-full p-2">
-                    <img :src="form.preview" class="w-full h-full object-cover rounded-2xl" />
-                </div>
-                <div v-else class="flex flex-col items-center">
-                    <Camera class="w-16 h-16 text-gray-600 group-hover:text-primary transition mb-4" />
-                    <span class="text-gray-500 font-medium">Toucher pour ajouter</span>
-                </div>
-                <input type="file" accept="image/*" @change="handleFileChange" class="hidden" />
-            </label>
-            <p v-if="imageError" class="text-red-500 text-sm text-center mt-2 font-medium">{{ imageError }}</p>
-        </div>
-
-        <!-- Step 2: Title -->
-        <div v-else-if="step === 2" class="flex flex-col items-center animate-in slide-in-from-right fade-in duration-300">
-            <h2 class="text-3xl font-bold text-white mb-2">Le titre ? ✨</h2>
-            
-            <div class="w-full relative mt-8">
-                <input v-model="form.title" type="text" placeholder="Ex: Soirée Mousse..." class="w-full bg-transparent border-b-2 border-gray-700 text-3xl font-bold text-center text-white pb-2 focus:outline-none focus:border-primary transition" />
-                <button @click="startDictation('title')" class="absolute right-0 bottom-2 text-primary p-2 hover:bg-white/10 rounded-full transition" :class="{'animate-pulse bg-red-500/20': isRecording}">
-                    <Mic class="w-6 h-6" />
-                </button>
-            </div>
-        </div>
-
-        <!-- Step 3: Date -->
-        <div v-else-if="step === 3" class="flex flex-col items-center animate-in slide-in-from-right fade-in duration-300">
-            <h2 class="text-3xl font-bold text-white mb-8">C'est quand ? 📅</h2>
-            <input v-model="form.date" type="datetime-local" class="bg-gray-900 text-white text-xl p-4 rounded-xl border border-gray-700 focus:border-primary outline-none w-full text-center" />
-        </div>
-
-        <!-- Step 4: Description -->
-        <div v-else-if="step === 4" class="flex flex-col items-center animate-in slide-in-from-right fade-in duration-300">
-            <h2 class="text-3xl font-bold text-white mb-2">Des détails ? 📝</h2>
-            <p class="text-gray-400 mb-8">Ambiance, prix, dress code...</p>
-
-            <div class="w-full relative">
-                <textarea v-model="form.description" rows="5" class="w-full bg-gray-900 text-white rounded-xl p-4 border border-gray-700 focus:border-primary outline-none text-lg resize-none" placeholder="Dites-nous en plus..."></textarea>
-                <button @click="startDictation('description')" class="absolute right-2 bottom-2 bg-primary p-3 rounded-full text-black hover:scale-105 transition" :class="{'animate-pulse bg-red-500': isRecording}">
-                    <Mic class="w-6 h-6" />
-                </button>
-            </div>
-            <button @click="generateDescription" :disabled="isGeneratingDesc" class="mt-3 flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 disabled:opacity-50">
-                <Sparkles class="w-4 h-4" />
-                <span>{{ isGeneratingDesc ? 'Génération…' : 'Générer avec l\'IA' }}</span>
-            </button>
-            <p v-if="aiError" class="text-red-500 text-xs mt-1">{{ aiError }}</p>
-        </div>
-
-        <!-- Step 5: Review -->
-        <div v-else-if="step === 5" class="flex flex-col items-center animate-in slide-in-from-right fade-in duration-300">
-            <h2 class="text-3xl font-bold text-white mb-6">On publie ? 🚀</h2>
-            
-            <div class="w-full bg-gray-900 rounded-2xl overflow-hidden border border-gray-800">
-                <img :src="form.preview" class="w-full h-48 object-cover" />
-                <div class="p-4">
-                    <h3 class="text-xl font-bold text-white">{{ form.title }}</h3>
-                    <p class="text-primary text-sm mb-2">{{ new Date(form.date).toLocaleString() }}</p>
-                    <p class="text-gray-400 text-sm line-clamp-3">{{ form.description }}</p>
-                </div>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- Navigation Area -->
-    <div class="w-full pt-6 flex justify-between items-center">
-        <button v-if="step > 1" @click="prevStep" class="text-gray-500 font-medium hover:text-white transition">
-            Retour
+  <div class="min-h-screen bg-black text-white flex flex-col">
+    <header class="sticky top-0 z-30 bg-black/90 backdrop-blur border-b border-gray-800 px-4 py-3">
+      <div class="max-w-lg mx-auto flex items-center justify-between">
+        <button @click="router.back()" class="text-gray-400 hover:text-white p-2 -ml-2">
+          <ArrowLeft class="w-5 h-5" />
         </button>
-        <div v-else></div> <!-- Spacer -->
+        <div class="text-center">
+          <h1 class="font-bold text-primary">Nouvel evenement</h1>
+          <p class="text-xs text-gray-500">Soumission organisateur</p>
+        </div>
+        <div class="w-9"></div>
+      </div>
+      <div class="max-w-lg mx-auto flex gap-1 mt-3">
+        <div
+          v-for="i in steps.length"
+          :key="i"
+          class="h-1 flex-1 rounded-full transition"
+          :class="i <= step ? 'bg-primary' : 'bg-gray-800'"
+        ></div>
+      </div>
+    </header>
 
-        <button v-if="step < 5" @click="nextStep" class="bg-primary text-black px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:scale-105 transition disabled:opacity-50 disabled:cursor-not-allowed" :disabled="step === 1 && !form.preview">
-            Suivant <ArrowRight class="w-5 h-5" />
-        </button>
-        <button v-else @click="publishEvent" class="bg-green-500 text-white px-8 py-3 rounded-full font-bold flex items-center gap-2 hover:scale-105 transition shadow-lg shadow-green-500/20">
-            Publier <Check class="w-5 h-5" />
-        </button>
-    </div>
+    <main class="flex-1 w-full max-w-lg mx-auto p-5 flex flex-col">
+      <div class="flex items-center gap-2 mb-5 text-sm text-gray-400">
+        <component :is="steps[step - 1].icon" class="w-4 h-4 text-primary" />
+        <span>Etape {{ step }} sur {{ steps.length }} - {{ steps[step - 1].title }}</span>
+      </div>
 
+      <section v-if="step === 1" class="space-y-5">
+        <div>
+          <h2 class="text-2xl font-bold mb-2">Media vertical</h2>
+          <p class="text-gray-400 text-sm">Ajoute une affiche ou une URL image/video.</p>
+        </div>
+        <label class="block w-full aspect-[4/5] bg-gray-900 border-2 border-dashed border-gray-700 rounded-2xl cursor-pointer hover:border-primary transition overflow-hidden">
+          <img v-if="form.preview" :src="form.preview" class="w-full h-full object-cover" />
+          <div v-else class="w-full h-full flex flex-col items-center justify-center text-gray-500">
+            <Camera class="w-14 h-14 mb-3" />
+            <span class="font-medium">Ajouter une image</span>
+          </div>
+          <input type="file" accept="image/*" @change="handleFileChange" class="hidden" />
+        </label>
+        <p v-if="imageError" class="text-red-400 text-sm">{{ imageError }}</p>
+        <input
+          v-model="form.mediaUrl"
+          type="url"
+          placeholder="Ou coller une URL image/video"
+          class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary"
+        />
+      </section>
+
+      <section v-else-if="step === 2" class="space-y-5">
+        <div>
+          <h2 class="text-2xl font-bold mb-2">Titre et accroche</h2>
+          <p class="text-gray-400 text-sm">Donne une promesse claire et courte.</p>
+        </div>
+        <input v-model="form.title" type="text" placeholder="Titre de l'evenement" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <input v-model="form.promoText" type="text" placeholder="Texte promo court" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+      </section>
+
+      <section v-else-if="step === 3" class="space-y-4">
+        <div>
+          <h2 class="text-2xl font-bold mb-2">Date et lieu</h2>
+          <p class="text-gray-400 text-sm">Ces donnees alimentent le feed geolocalise.</p>
+        </div>
+        <input v-model="form.date" type="datetime-local" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <input v-model="form.endDate" type="datetime-local" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <input v-model="form.location" type="text" placeholder="Nom du lieu ou point de vente" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <input v-model="form.address" type="text" placeholder="Adresse" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <div class="grid grid-cols-2 gap-3">
+          <input v-model="form.city" type="text" placeholder="Ville" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+          <input v-model="form.district" type="text" placeholder="Quartier" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        </div>
+        <button @click="useCurrentPosition" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 flex items-center justify-center gap-2 text-gray-300 hover:border-primary transition">
+          <MapPin class="w-4 h-4" />
+          Utiliser ma position GPS
+        </button>
+        <input v-model="form.organizerPhone" type="tel" placeholder="Telephone WhatsApp organisateur" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+      </section>
+
+      <section v-else-if="step === 4" class="space-y-4">
+        <div>
+          <h2 class="text-2xl font-bold mb-2">Description et tags</h2>
+          <p class="text-gray-400 text-sm">Les tags servent aux filtres et au ciblage publicitaire.</p>
+        </div>
+        <textarea v-model="form.description" rows="5" placeholder="Ambiance, programme, infos pratiques..." class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary resize-none"></textarea>
+        <input v-model="tagsInput" type="text" placeholder="Tags separes par des virgules" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <label class="w-full flex items-center justify-between bg-gray-900 border border-gray-700 rounded-xl p-4 cursor-pointer">
+          <span class="font-medium">Preparer la reservation</span>
+          <input type="checkbox" v-model="form.ticketingEnabled" class="w-5 h-5 accent-primary" />
+        </label>
+        <div v-if="form.ticketingEnabled" class="grid grid-cols-2 gap-3">
+          <input v-model.number="form.ticketPrice" type="number" min="0" step="500" placeholder="Prix CFA" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+          <input v-model.number="form.ticketCapacity" type="number" min="1" placeholder="Capacite" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        </div>
+      </section>
+
+      <section v-else class="space-y-5">
+        <div>
+          <h2 class="text-2xl font-bold mb-2">Recapitulatif</h2>
+          <p class="text-gray-400 text-sm">L'evenement sera envoye en validation admin.</p>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <img v-if="form.preview || form.mediaUrl" :src="form.preview || form.mediaUrl" class="w-full h-48 object-cover" />
+          <div class="p-4 space-y-2">
+            <h3 class="text-xl font-bold">{{ form.title }}</h3>
+            <p class="text-primary text-sm">{{ new Date(form.date).toLocaleString('fr-FR') }}</p>
+            <p class="text-gray-300 text-sm">{{ form.location }} - {{ form.district || form.city }}</p>
+            <p class="text-gray-400 text-sm line-clamp-3">{{ form.description }}</p>
+            <div v-if="tagList.length" class="flex flex-wrap gap-2 pt-2">
+              <span v-for="tag in tagList" :key="tag" class="bg-white/10 text-white text-xs px-2 py-1 rounded-full">{{ tag }}</span>
+            </div>
+            <div v-if="form.ticketingEnabled" class="inline-flex items-center gap-1 bg-primary/20 text-primary text-xs px-2 py-1 rounded-full">
+              <Ticket class="w-3 h-3" /> {{ form.ticketPrice || 0 }} CFA
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="sticky bottom-0 bg-black/95 backdrop-blur border-t border-gray-800 p-4">
+      <div class="max-w-lg mx-auto flex justify-between items-center gap-3">
+        <button v-if="step > 1" @click="prevStep" class="px-4 py-3 text-gray-400 hover:text-white transition">
+          Retour
+        </button>
+        <div v-else></div>
+
+        <button
+          v-if="step < steps.length"
+          @click="nextStep"
+          :disabled="!canContinue"
+          class="bg-primary text-black px-6 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Suivant <ArrowRight class="w-5 h-5" />
+        </button>
+        <button
+          v-else
+          @click="publishEvent"
+          :disabled="isSubmitting"
+          class="bg-green-500 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 disabled:opacity-50"
+        >
+          <Check class="w-5 h-5" />
+          {{ isSubmitting ? 'Envoi...' : 'Soumettre a validation' }}
+        </button>
+      </div>
+    </footer>
   </div>
 </template>

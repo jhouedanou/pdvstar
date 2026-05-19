@@ -3,7 +3,8 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <link rel="icon" type="image/svg+xml" href="/appIcon.svg" />
+  <link rel="apple-touch-icon" href="/appIcon.svg" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="manifest" href="/manifest.json" />
@@ -20,6 +21,18 @@
   <link rel="dns-prefetch" href="https://i.ytimg.com" />
   <link rel="dns-prefetch" href="https://yt3.ggpht.com" />
   <title>BABI VIBES - Nightlife Abidjan</title>
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "6dac9d35-658b-497f-8c5e-16539b1d58b7",
+        allowLocalhostAsSecureOrigin: true,
+        serviceWorkerPath: "OneSignalSDKWorker.js",
+        serviceWorkerParam: { scope: "/" }
+      });
+    });
+  </script>
 </head>
 
 <body>

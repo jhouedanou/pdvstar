@@ -16,7 +16,8 @@ const scanning = ref(true)
 
 onMounted(async () => {
     try {
-        const mod = await import('vue-qrcode-reader')
+        const modName = 'vue-qrcode-reader'
+        const mod = await import(/* @vite-ignore */ modName)
         QrStream.value = mod.QrcodeStream
         cameraReady.value = true
     } catch (e) {

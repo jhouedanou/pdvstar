@@ -46,7 +46,8 @@ export async function fetchEventStats(eventId) {
  * Export CSV générique. Charger papaparse dynamiquement.
  */
 export async function exportToCsv(filename, rows) {
-    const Papa = await import('papaparse')
+    const modName = 'papaparse'
+    const Papa = await import(/* @vite-ignore */ modName)
     const csv = Papa.unparse(rows)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)

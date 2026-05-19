@@ -49,8 +49,19 @@ const defaultForm = () => ({
     sponsor: '',
     ctaText: 'En savoir plus',
     isActive: true,
-    position: 0
+    position: 0,
+    format: 'banner',
+    targetQuartier: '',
+    targetPdv: '',
+    videoUrl: ''
 })
+
+const AD_FORMATS = [
+    { value: 'banner',     label: 'Banniere' },
+    { value: 'fullscreen', label: 'Plein ecran' },
+    { value: 'video',      label: 'Video' },
+    { value: 'story',      label: 'Story sponso' }
+]
 
 const form = ref(defaultForm())
 
@@ -103,7 +114,11 @@ const openEditModal = (ad) => {
         sponsor: ad.sponsor,
         ctaText: ad.ctaText || 'En savoir plus',
         isActive: ad.isActive,
-        position: ad.position || 0
+        position: ad.position || 0,
+        format: ad.format || 'banner',
+        targetQuartier: ad.targetQuartier || '',
+        targetPdv: ad.targetPdv || '',
+        videoUrl: ad.videoUrl || ''
     }
     showModal.value = true
 }
@@ -124,7 +139,12 @@ const handleSubmit = async () => {
         ctaText: form.value.ctaText || 'En savoir plus',
         isActive: form.value.isActive,
         position: form.value.position || 0,
-        createdBy: userStore.user?.id || null
+        format: form.value.format || 'banner',
+        targetQuartier: form.value.targetQuartier || null,
+        targetPdv: form.value.targetPdv || null,
+        videoUrl: form.value.videoUrl || null,
+        createdBy: userStore.user?.id || null,
+        advertiserId: userStore.user?.id || null
     }
 
     if (editingAd.value) {
@@ -178,7 +198,7 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
           </p>
         </div>
         <div class="flex items-center gap-4">
-          <router-link to="/admin/dashboard" class="text-gray-400 text-sm hover:text-white transition flex items-center gap-1">
+          <router-link :to="isOrganizerMode ? '/organizer' : '/admin/dashboard'" class="text-gray-400 text-sm hover:text-white transition flex items-center gap-1">
             <ArrowLeft class="w-4 h-4" />
             {{ isOrganizerMode ? 'Mon Espace' : 'Dashboard Admin' }}
           </router-link>
@@ -393,7 +413,7 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
 
             <!-- Link -->
             <div>
-              <label class="block text-gray-400 text-sm mb-2">🔗 Lien de destination (URL)</label>
+              <label class="block text-gray-400 text-sm mb-2">Lien de destination (URL)</label>
               <input 
                 v-model="form.link" 
                 type="url" 
@@ -405,12 +425,41 @@ const activeAds = computed(() => ads.value.filter(a => a.isActive).length)
             <!-- CTA Text -->
             <div>
               <label class="block text-gray-400 text-sm mb-2">Texte du bouton CTA</label>
-              <input 
-                v-model="form.ctaText" 
-                type="text" 
+              <input
+                v-model="form.ctaText"
+                type="text"
                 placeholder="Ex: En savoir plus, Commander, Découvrir..."
                 class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none transition"
               />
+            </div>
+
+            <!-- Phase 3: Format publicitaire -->
+            <div>
+              <label class="block text-gray-400 text-sm mb-2">Format</label>
+              <select v-model="form.format" class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none">
+                <option v-for="f in AD_FORMATS" :key="f.value" :value="f.value">{{ f.label }}</option>
+              </select>
+            </div>
+
+            <!-- Phase 3: URL vidéo si format video -->
+            <div v-if="form.format === 'video' || form.format === 'story'">
+              <label class="block text-gray-400 text-sm mb-2">URL vidéo (MP4/YouTube)</label>
+              <input v-model="form.videoUrl" type="url" placeholder="https://..."
+                class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none" />
+            </div>
+
+            <!-- Phase 3: Ciblage -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-gray-400 text-sm mb-2">Quartier (cible)</label>
+                <input v-model="form.targetQuartier" type="text" placeholder="Cocody, Plateau…"
+                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none" />
+              </div>
+              <div>
+                <label class="block text-gray-400 text-sm mb-2">PDV (cible)</label>
+                <input v-model="form.targetPdv" type="text" placeholder="Code PDV"
+                  class="w-full bg-gray-900 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-yellow-400 focus:outline-none" />
+              </div>
             </div>
 
             <!-- Position & Active -->

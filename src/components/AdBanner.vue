@@ -2,6 +2,7 @@
 import { defineProps, ref, onMounted } from 'vue'
 import { ExternalLink, Eye, Share2 } from 'lucide-vue-next'
 import { incrementAdClick, supabase } from '../services/supabase'
+import { trackAd } from '../services/adsService'
 
 const props = defineProps({
     ad: {
@@ -17,31 +18,23 @@ const props = defineProps({
 const viewCount = ref(props.ad.viewCount || Math.floor(Math.random() * 1000) + 500)
 const hasViewed = ref(false)
 
-// Track impression on mount
+// Track impression on mount (RPC granulaire Phase 3 + fallback)
 onMounted(async () => {
     try {
-        await supabase.from('ads').select('view_count').eq('id', props.ad.id).single().then(async ({ data }) => {
-            if (data) {
-                await supabase.from('ads').update({ view_count: (data.view_count || 0) + 1 }).eq('id', props.ad.id)
-                viewCount.value = (data.view_count || 0) + 1
-            }
-        })
+        await trackAd({ adId: props.ad.id, type: 'view' })
+        viewCount.value++
     } catch (e) {
         // Silently fail
     }
 })
 
 const handleAdClick = async () => {
-    if (!hasViewed.value) {
-        viewCount.value++
+    try {
+        await trackAd({ adId: props.ad.id, type: 'click' })
         hasViewed.value = true
-        try {
-            await incrementAdClick(props.ad.id)
-        } catch (e) {
-            console.warn('Ad click tracking failed:', e)
-        }
+    } catch (e) {
+        console.warn('Ad click tracking failed:', e)
     }
-    
     const link = props.ad.link || '#'
     if (link && link !== '#') {
         window.open(link, '_blank')

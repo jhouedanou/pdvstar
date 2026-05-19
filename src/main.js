@@ -13,14 +13,30 @@ import AdminLogin from './views/AdminLogin.vue'
 import AdminDashboard from './views/AdminDashboard.vue'
 import AdsDashboard from './views/AdsDashboard.vue'
 import LegalPages from './views/LegalPages.vue'
+import TicketPurchase from './views/TicketPurchase.vue'
+import TicketScan from './views/TicketScan.vue'
+import ProfilePage from './views/ProfilePage.vue'
+import OrganizerEventDetail from './views/OrganizerEventDetail.vue'
+import AdminEventDetail from './views/AdminEventDetail.vue'
+import AdminStats from './views/AdminStats.vue'
 
 const routes = [
     { path: '/', component: FeedUser }, // Default to User Feed
+    { path: '/profile', component: ProfilePage },
     { path: '/pro', component: ProDashboard, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/pro/create', component: CreateEventWizard, meta: { requiresRole: ['organizer', 'admin'] } },
+    { path: '/organizer', component: ProDashboard, meta: { requiresRole: ['organizer', 'admin'] } },
+    { path: '/organizer/events/new', component: CreateEventWizard, meta: { requiresRole: ['organizer', 'admin'] } },
+    { path: '/organizer/events/:id', component: OrganizerEventDetail, meta: { requiresRole: ['organizer', 'admin'] } },
+    { path: '/organizer/ads', component: AdsDashboard, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/admin', component: AdminLogin },
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
+    { path: '/admin/events', component: AdminDashboard, meta: { requiresAdmin: true } },
+    { path: '/admin/events/:id', component: AdminEventDetail, meta: { requiresAdmin: true } },
     { path: '/admin/ads', component: AdsDashboard, meta: { requiresAdmin: true } },
+    { path: '/admin/stats', component: AdminStats, meta: { requiresAdmin: true } },
+    { path: '/billet/:id', component: TicketPurchase },
+    { path: '/billet/scan', component: TicketScan, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/legal', component: LegalPages },
 ]
 
@@ -53,7 +69,7 @@ const hasRole = (allowed) => {
 // Navigation guards : admin OU rôles applicatifs
 router.beforeEach((to, from, next) => {
     if (to.meta.requiresAdmin) {
-        if (checkAdminSession() || hasRole(['organizer', 'admin'])) return next()
+        if (checkAdminSession() || hasRole(['admin'])) return next()
         return next('/admin')
     }
     if (to.meta.requiresRole) {

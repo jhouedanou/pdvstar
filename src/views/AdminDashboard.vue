@@ -16,6 +16,7 @@ import {
     AlertTriangle, Lock, Ticket, Gift, Ban
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
+import { approveEvent as modApprove, rejectEvent as modReject } from '../services/moderationService'
 import L from 'leaflet'
 
 const router = useRouter()
@@ -264,6 +265,9 @@ const showEditModal = ref(false)
 const editingEvent = ref(null)
 const deleteConfirmId = ref(null)
 const statusFilter = ref('all') // all, pending, approved, rejected
+const organizerFilter = ref('')
+const locationFilter = ref('')
+const dateFilter = ref('all')
 const showRejectModal = ref(false)
 const rejectingEvent = ref(null)
 const rejectionReason = ref('')
@@ -279,9 +283,28 @@ const statusCounts = computed(() => {
     }
 })
 
+const adminSummary = computed(() => {
+    const list = eventStore.events
+    return {
+        total: list.length,
+        pending: list.filter(e => e.status === 'pending').length,
+        approved: list.filter(e => !e.status || e.status === 'approved').length,
+        attendances: list.reduce((sum, e) => sum + (e.participantCount || 0), 0),
+        contacts: list.reduce((sum, e) => sum + (e.participantCount || 0), 0),
+        views: list.reduce((sum, e) => sum + (e.viewCount || 0), 0),
+        clicks: list.reduce((sum, e) => sum + (e.clickCount || 0), 0)
+    }
+})
+
 // Approuver un événement
 const approveEvent = async (event) => {
-    await eventStore.updateEvent(event.id, { status: 'approved', rejectionReason: '' })
+    await eventStore.updateEvent(event.id, {
+        status: 'approved',
+        rejectionReason: '',
+        approvedBy: userStore.user?.id || null,
+        approvedAt: new Date().toISOString()
+    })
+    modApprove(event.id, userStore.user?.id || null).catch(() => {})
 }
 
 // Ouvrir la modale de rejet
@@ -294,10 +317,12 @@ const openRejectModal = (event) => {
 // Confirmer le rejet
 const confirmReject = async () => {
     if (rejectingEvent.value) {
+        const reason = rejectionReason.value || 'Non conforme aux critères'
         await eventStore.updateEvent(rejectingEvent.value.id, {
             status: 'rejected',
-            rejectionReason: rejectionReason.value || 'Non conforme aux critères'
+            rejectionReason: reason
         })
+        modReject(rejectingEvent.value.id, reason, userStore.user?.id || null).catch(() => {})
     }
     showRejectModal.value = false
     rejectingEvent.value = null

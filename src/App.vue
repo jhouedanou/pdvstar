@@ -1,5 +1,20 @@
 <script setup>
-// Main layout container
+import { onMounted, watch } from 'vue'
+import { useUserStore } from './stores/userStore'
+import { initPush, subscribeUser } from './services/pushService'
+
+const userStore = useUserStore()
+
+onMounted(() => {
+    initPush()
+})
+
+// Auto-subscribe push après login
+watch(() => userStore.user?.id, (uid) => {
+    if (uid && import.meta.env.VITE_ONESIGNAL_APP_ID) {
+        subscribeUser(uid).catch(() => {})
+    }
+})
 </script>
 
 <template>

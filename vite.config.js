@@ -11,6 +11,7 @@ export default defineConfig({
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,jpg,jpeg}'],
+        globIgnores: ['**/OneSignalSDKWorker.js'],
         // Forcer la mise à jour immédiate du service worker
         skipWaiting: true,
         clientsClaim: true,
@@ -102,15 +103,9 @@ export default defineConfig({
         categories: ['entertainment', 'lifestyle', 'social'],
         icons: [
           {
-            src: 'pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any maskable'
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
+            src: 'appIcon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
             purpose: 'any maskable'
           }
         ]

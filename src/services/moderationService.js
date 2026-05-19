@@ -22,7 +22,12 @@ export async function submitEventForReview(eventId) {
 export async function approveEvent(eventId, adminId = null) {
     const { data, error } = await supabase
         .from('events')
-        .update({ status: 'approved', rejection_reason: null })
+        .update({
+            status: 'approved',
+            rejection_reason: null,
+            approved_by: adminId,
+            approved_at: new Date().toISOString()
+        })
         .eq('id', eventId)
         .select()
         .single()
