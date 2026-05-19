@@ -38,6 +38,14 @@ input {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+.app-bottom-nav {
+  --bottom-nav-safe: max(0.625rem, env(safe-area-inset-bottom, 0px));
+  height: calc(4rem + var(--bottom-nav-safe));
+  padding-top: 0.5rem;
+  padding-bottom: var(--bottom-nav-safe);
+  align-items: center;
+}
+
 /* ========================================
    RESPONSIVE LAYOUT - ÉCRANS PLIABLES & ATYPIQUES
    ======================================== */
@@ -101,13 +109,13 @@ input {
 @media (orientation: landscape) and (max-height: 500px) {
 
   /* Réduire les espacements verticaux */
-  .header-tabs {
+  .feed-header {
     padding-top: 0.5rem !important;
-    padding-bottom: 0.5rem !important;
   }
 
   .bottom-nav {
-    height: 3rem !important;
+    height: calc(3rem + var(--bottom-nav-safe, 0.625rem)) !important;
+    padding-top: 0.25rem !important;
   }
 
   /* Optimiser l'affichage du contenu */

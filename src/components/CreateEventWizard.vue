@@ -1,32 +1,33 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@vueuse/core'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { processImage, processAndUpload } from '../utils/imageUpload'
 import { useDictation } from '../composables/useDictation'
-import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, MapPin, Ticket, Type, Mic, MicOff, Music } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, Loader2, MapPin, Mic, MicOff, Music, Plus, Tag, Ticket, Type, X } from 'lucide-vue-next'
 
 const router = useRouter()
 const store = useEventStore()
 const userStore = useUserStore()
 const { coords, resume } = useGeolocation()
 
-// Dictée vocale pour la description
-const { supported: dictSupported, isListening: isDictating, transcript: dictTranscript, start: startDictation, stop: stopDictation, reset: resetDictation } = useDictation('fr-FR')
-
-// Appliquer la transcription dans la description
-watch(dictTranscript, (t) => {
-    if (t) form.value.description = t
-})
+// Dictée vocale multi-champs
+const { supported: dictSupported, isListening: isDictating, transcript: dictTranscript, interim: dictInterim, error: dictRawError, start: startSpeechDictation, stop: stopSpeechDictation, reset: resetDictation } = useDictation('fr-FR')
 
 const step = ref(1)
 const isSubmitting = ref(false)
 const imageError = ref('')
 const tagsInput = ref('')
+const customTagInput = ref('')
 const gpsLoading = ref(false)
 const gpsError = ref('')
+const dictationField = ref('')
+const dictationBaseText = ref('')
+const dictationError = ref('')
+const isFetchingTitle = ref(false)
+let fetchTitleTimeout = null
 
 // Date et heure séparées
 const todayStr = new Date().toISOString().slice(0, 10)
@@ -52,12 +53,17 @@ const form = ref({
     preview: '',
     mediaUrl: '',
     mediaType: 'image',
+    videoUrl: '',
     location: '',
     address: '',
     city: 'Abidjan',
     district: '',
     coords: null,
+    organizer: '',
     organizerPhone: userStore.user?.phone || '',
+    features: [],
+    isPremium: false,
+    price: 0,
     musicTitle: '',
     backgroundMusic: '',
     ticketingEnabled: false,
@@ -77,16 +83,144 @@ const tagList = computed(() => {
         .filter(Boolean)
 })
 
+const selectedTags = computed(() => {
+    return [...new Set([...form.value.features, ...tagList.value])]
+})
+
 const organizerName = computed(() => {
     return userStore.user?.organizerName || userStore.user?.spaceName || userStore.user?.name || userStore.user?.pseudo || 'Organisateur'
 })
 
+const predefinedTags = [
+    'VIP Access', 'Free Drink', 'Photo Booth', 'Live DJ',
+    'Open Bar', 'Dress Code', 'Parking', 'Guest List',
+    'After Party', 'Buffet', 'Piscine', 'Jeux'
+]
+
+const dictationFieldLabels = {
+    title: 'Titre',
+    promoText: 'Promotion',
+    location: 'Lieu',
+    organizer: 'Organisateur',
+    description: 'Description',
+    musicTitle: 'Titre musique',
+    customTag: 'Tag'
+}
+
+const extractYouTubeId = (url) => {
+    if (!url) return null
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+        /^([a-zA-Z0-9_-]{11})$/
+    ]
+    for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match) return match[1]
+    }
+    return null
+}
+
+const isBackgroundMusicValid = computed(() => {
+    return !form.value.backgroundMusic || !!extractYouTubeId(form.value.backgroundMusic)
+})
+
+const isMediaReady = computed(() => {
+    return !!(form.value.preview || form.value.mediaUrl)
+})
+
 const canContinue = computed(() => {
-    if (step.value === 1) return !!(form.value.preview || form.value.mediaUrl)
+    if (step.value === 1) return isMediaReady.value
     if (step.value === 2) return !!form.value.title.trim()
     if (step.value === 3) return !!form.value.date && !!form.value.location.trim()
-    if (step.value === 4) return !!form.value.description.trim()
+    if (step.value === 4) return !!form.value.description.trim() && isBackgroundMusicValid.value
     return true
+})
+
+watch(dictTranscript, (t) => {
+    if (!dictationField.value || !t) return
+    if (dictationField.value === 'customTag') {
+        customTagInput.value = t
+        return
+    }
+    form.value[dictationField.value] = dictationBaseText.value ? `${dictationBaseText.value} ${t}` : t
+})
+
+watch(dictRawError, (error) => {
+    if (!error) return
+    dictationError.value = error === 'not-allowed'
+        ? 'Acces micro refuse. Autorisez le micro puis reessayez.'
+        : `Dictee indisponible : ${error}`
+    setTimeout(() => { dictationError.value = '' }, 4000)
+})
+
+watch(isDictating, (listening) => {
+    if (!listening) dictationField.value = ''
+})
+
+const toggleDictation = (field) => {
+    dictationError.value = ''
+    if (!dictSupported) {
+        dictationError.value = 'Dictee vocale non supportee. Utilisez Chrome ou Edge.'
+        setTimeout(() => { dictationError.value = '' }, 4000)
+        return
+    }
+    if (isDictating.value && dictationField.value === field) {
+        stopSpeechDictation()
+        return
+    }
+    stopSpeechDictation()
+    resetDictation()
+    dictationField.value = field
+    dictationBaseText.value = field === 'customTag' ? '' : (form.value[field] || '')
+    startSpeechDictation()
+}
+
+const stopCurrentDictation = () => {
+    stopSpeechDictation()
+    dictationField.value = ''
+}
+
+const toggleTag = (tag) => {
+    const idx = form.value.features.indexOf(tag)
+    if (idx >= 0) form.value.features.splice(idx, 1)
+    else form.value.features.push(tag)
+}
+
+const addCustomTag = () => {
+    const tag = customTagInput.value.trim()
+    if (tag && !form.value.features.includes(tag)) {
+        form.value.features.push(tag)
+    }
+    customTagInput.value = ''
+    resetDictation()
+}
+
+const removeTag = (index) => {
+    form.value.features.splice(index, 1)
+}
+
+const fetchYouTubeTitle = async (url) => {
+    const videoId = extractYouTubeId(url)
+    if (!videoId || form.value.musicTitle.trim()) return
+    isFetchingTitle.value = true
+    try {
+        const response = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
+        if (response.ok) {
+            const data = await response.json()
+            if (data.title && !form.value.musicTitle.trim()) form.value.musicTitle = data.title
+        }
+    } catch (err) {
+        console.warn('Titre YouTube indisponible:', err)
+    } finally {
+        isFetchingTitle.value = false
+    }
+}
+
+watch(() => form.value.backgroundMusic, (newUrl) => {
+    if (fetchTitleTimeout) clearTimeout(fetchTitleTimeout)
+    if (newUrl && extractYouTubeId(newUrl)) {
+        fetchTitleTimeout = setTimeout(() => fetchYouTubeTitle(newUrl), 600)
+    }
 })
 
 const handleFileChange = async (e) => {
@@ -105,11 +239,9 @@ const handleFileChange = async (e) => {
     if (uploaded.success) {
         form.value.image = uploaded.data
         form.value.mediaUrl = uploaded.data
-        form.value.mediaType = 'image'
     } else {
         form.value.image = compressed.data
         form.value.mediaUrl = compressed.data
-        form.value.mediaType = 'image'
         imageError.value = uploaded.error || 'Upload bucket échoué, image stockée en base64'
     }
 }
@@ -152,6 +284,8 @@ const publishEvent = async () => {
     const lat = form.value.coords?.lat ?? (coords.value.latitude !== Infinity ? coords.value.latitude : 5.30966)
     const lng = form.value.coords?.lng ?? (coords.value.longitude !== Infinity ? coords.value.longitude : -3.97449)
     const status = userStore.isOrganizer ? 'pending' : 'approved'
+    const eventOrganizer = form.value.organizer || organizerName.value
+    const coverImage = form.value.preview || form.value.mediaUrl || form.value.image || ''
 
     await store.addEvent({
         title: form.value.title || 'Evenement sans titre',
@@ -161,9 +295,10 @@ const publishEvent = async () => {
         date: form.value.date,
         eventDate: form.value.date,
         endDate: form.value.endDate || null,
-        image: form.value.preview || form.value.mediaUrl,
-        mediaUrl: form.value.mediaUrl || form.value.preview,
-        mediaType: form.value.mediaType,
+        image: coverImage,
+        mediaUrl: coverImage,
+        mediaType: 'image',
+        videoUrl: '',
         location: form.value.location,
         locationName: form.value.location,
         address: form.value.address,
@@ -172,16 +307,19 @@ const publishEvent = async () => {
         district: form.value.district,
         quartier: form.value.district,
         coords: { lat, lng },
-        organizer: organizerName.value,
-        organizerName: organizerName.value,
+        organizer: eventOrganizer,
+        organizerName: eventOrganizer,
         organizerPhone: form.value.organizerPhone || userStore.user?.phone || '',
         musicTitle: form.value.musicTitle || '',
         backgroundMusic: form.value.backgroundMusic || '',
+        musicUrl: form.value.backgroundMusic || '',
+        isPremium: form.value.isPremium,
+        price: form.value.isPremium ? Number(form.value.price) || 0 : 0,
         organizerId: userStore.user?.id || null,
         createdBy: userStore.user?.id || null,
         status,
-        tags: tagList.value,
-        features: tagList.value,
+        tags: selectedTags.value,
+        features: selectedTags.value,
         ticketingEnabled: form.value.ticketingEnabled,
         isTicketingEnabled: form.value.ticketingEnabled,
         ticketPrice: form.value.ticketingEnabled ? Number(form.value.ticketPrice) || 0 : 0,
@@ -195,6 +333,12 @@ const publishEvent = async () => {
 
 onMounted(() => {
     resume()
+    if (!form.value.organizer) form.value.organizer = organizerName.value
+})
+
+onUnmounted(() => {
+    if (fetchTitleTimeout) clearTimeout(fetchTitleTimeout)
+    stopCurrentDictation()
 })
 </script>
 
@@ -227,26 +371,51 @@ onMounted(() => {
         <span>Etape {{ step }} sur {{ steps.length }} - {{ steps[step - 1].title }}</span>
       </div>
 
+      <div v-if="dictationError" class="mb-4 bg-red-500/15 border border-red-500/30 text-red-300 text-sm p-3 rounded-xl">
+        {{ dictationError }}
+      </div>
+      <div v-if="isDictating" class="mb-4 bg-red-500/10 border border-red-500/30 text-red-300 text-sm p-3 rounded-xl flex items-center justify-between gap-3">
+        <span class="flex items-center gap-2 min-w-0">
+          <span class="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse flex-shrink-0"></span>
+          <span class="truncate">Parlez maintenant : {{ dictationFieldLabels[dictationField] || 'champ' }}{{ dictInterim ? ` - ${dictInterim}` : '' }}</span>
+        </span>
+        <button @click="stopCurrentDictation" class="text-xs font-bold text-red-200 bg-red-500/20 px-2 py-1 rounded-lg">Stop</button>
+      </div>
+
       <section v-if="step === 1" class="space-y-5">
         <div>
-          <h2 class="text-2xl font-bold mb-2">Media vertical</h2>
-          <p class="text-gray-400 text-sm">Ajoute une affiche ou une URL image/video.</p>
+          <h2 class="text-2xl font-bold mb-2">Illustration</h2>
+          <p class="text-gray-400 text-sm">Le feed affiche toujours le visuel de l'event. La video YouTube se met plus bas comme musique de fond.</p>
         </div>
-        <label class="block w-full aspect-[4/5] bg-gray-900 border-2 border-dashed border-gray-700 rounded-2xl cursor-pointer hover:border-primary transition overflow-hidden">
-          <img v-if="form.preview" :src="form.preview" class="w-full h-full object-cover" />
-          <div v-else class="w-full h-full flex flex-col items-center justify-center text-gray-500">
-            <Camera class="w-14 h-14 mb-3" />
-            <span class="font-medium">Ajouter une image</span>
-          </div>
-          <input type="file" accept="image/*" @change="handleFileChange" class="hidden" />
-        </label>
-        <p v-if="imageError" class="text-red-400 text-sm">{{ imageError }}</p>
-        <input
-          v-model="form.mediaUrl"
-          type="url"
-          placeholder="Ou coller une URL image/video"
-          class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary"
-        />
+
+        <div>
+          <label class="text-xs text-gray-400 font-medium mb-2 block">
+            Image de l evenement
+          </label>
+          <label class="block w-full aspect-[4/5] bg-gray-900 border-2 border-dashed border-gray-700 rounded-2xl cursor-pointer hover:border-primary transition overflow-hidden">
+            <img v-if="form.preview || form.mediaUrl" :src="form.preview || form.mediaUrl" class="w-full h-full object-cover" />
+            <div v-else class="w-full h-full flex flex-col items-center justify-center text-gray-500">
+              <Camera class="w-14 h-14 mb-3" />
+              <span class="font-medium">Ajouter une image</span>
+            </div>
+            <input type="file" accept="image/*" @change="handleFileChange" class="hidden" />
+          </label>
+          <button
+            v-if="form.preview || form.mediaUrl"
+            type="button"
+            @click="form.preview = ''; form.image = ''; form.mediaUrl = ''"
+            class="mt-2 text-xs text-red-300 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl flex items-center gap-1"
+          >
+            <X class="w-3.5 h-3.5" /> Retirer l'image
+          </button>
+          <p v-if="imageError" class="text-red-400 text-sm mt-2">{{ imageError }}</p>
+          <input
+            v-model="form.mediaUrl"
+            type="url"
+            placeholder="Ou coller une URL image"
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary mt-3"
+          />
+        </div>
       </section>
 
       <section v-else-if="step === 2" class="space-y-5">
@@ -254,8 +423,48 @@ onMounted(() => {
           <h2 class="text-2xl font-bold mb-2">Titre et accroche</h2>
           <p class="text-gray-400 text-sm">Donne une promesse claire et courte.</p>
         </div>
-        <input v-model="form.title" type="text" placeholder="Titre de l'evenement" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
-        <input v-model="form.promoText" type="text" placeholder="Texte promo court" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <div class="flex gap-2">
+          <input v-model="form.title" type="text" placeholder="Titre de l'evenement" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+          <button
+            type="button"
+            @click="toggleDictation('title')"
+            class="px-3 rounded-xl transition"
+            :class="isDictating && dictationField === 'title' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+            title="Dicter le titre"
+          >
+            <MicOff v-if="isDictating && dictationField === 'title'" class="w-5 h-5" />
+            <Mic v-else class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="flex gap-2">
+          <input v-model="form.promoText" type="text" placeholder="Texte promo court / promotion" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+          <button
+            type="button"
+            @click="toggleDictation('promoText')"
+            class="px-3 rounded-xl transition"
+            :class="isDictating && dictationField === 'promoText' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+            title="Dicter la promotion"
+          >
+            <MicOff v-if="isDictating && dictationField === 'promoText'" class="w-5 h-5" />
+            <Mic v-else class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs text-gray-400 font-medium">Organisateur</label>
+          <div class="flex gap-2">
+            <input v-model="form.organizer" type="text" placeholder="Nom de l'organisateur" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+            <button
+              type="button"
+              @click="toggleDictation('organizer')"
+              class="px-3 rounded-xl transition"
+              :class="isDictating && dictationField === 'organizer' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+              title="Dicter l'organisateur"
+            >
+              <MicOff v-if="isDictating && dictationField === 'organizer'" class="w-5 h-5" />
+              <Mic v-else class="w-5 h-5" />
+            </button>
+          </div>
+        </div>
       </section>
 
       <section v-else-if="step === 3" class="space-y-4">
@@ -281,7 +490,19 @@ onMounted(() => {
           <input v-model="form.endDate" type="datetime-local" :min="form.date"
             class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary text-white [color-scheme:dark]" />
         </div>
-        <input v-model="form.location" type="text" placeholder="Nom du lieu ou point de vente" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <div class="flex gap-2">
+          <input v-model="form.location" type="text" placeholder="Nom du lieu ou point de vente" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+          <button
+            type="button"
+            @click="toggleDictation('location')"
+            class="px-3 rounded-xl transition"
+            :class="isDictating && dictationField === 'location' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+            title="Dicter le lieu"
+          >
+            <MicOff v-if="isDictating && dictationField === 'location'" class="w-5 h-5" />
+            <Mic v-else class="w-5 h-5" />
+          </button>
+        </div>
         <input v-model="form.address" type="text" placeholder="Adresse" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
         <div class="grid grid-cols-2 gap-3">
           <input v-model="form.city" type="text" placeholder="Ville" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
@@ -301,8 +522,8 @@ onMounted(() => {
 
       <section v-else-if="step === 4" class="space-y-4">
         <div>
-          <h2 class="text-2xl font-bold mb-2">Description et tags</h2>
-          <p class="text-gray-400 text-sm">Les tags servent aux filtres et au ciblage publicitaire.</p>
+          <h2 class="text-2xl font-bold mb-2">Details admin</h2>
+          <p class="text-gray-400 text-sm">Description, tags, premium, reservation et musique de fond.</p>
         </div>
         <!-- Catégorie -->
         <div class="space-y-1">
@@ -319,8 +540,85 @@ onMounted(() => {
             <option value="festival">🂪 Festival</option>
           </select>
         </div>
-        <textarea v-model="form.description" rows="5" placeholder="Ambiance, programme, infos pratiques..." class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary resize-none"></textarea>
-        <input v-model="tagsInput" type="text" placeholder="Tags separes par des virgules" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs text-gray-400 font-medium">Description</label>
+            <button
+              type="button"
+              @click="toggleDictation('description')"
+              class="p-2 rounded-lg transition"
+              :class="isDictating && dictationField === 'description' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+              title="Dicter la description"
+            >
+              <MicOff v-if="isDictating && dictationField === 'description'" class="w-4 h-4" />
+              <Mic v-else class="w-4 h-4" />
+            </button>
+          </div>
+          <textarea v-model="form.description" rows="5" placeholder="Ambiance, programme, infos pratiques..." class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary resize-none"></textarea>
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1">
+            <Tag class="w-3.5 h-3.5" />
+            Tags / Features
+          </label>
+          <div class="flex flex-wrap gap-2 mb-3">
+            <button
+              v-for="tag in predefinedTags"
+              :key="tag"
+              type="button"
+              @click="toggleTag(tag)"
+              class="px-3 py-1.5 rounded-full text-xs font-bold transition border"
+              :class="form.features.includes(tag) ? 'bg-primary/20 text-primary border-primary/50' : 'bg-gray-900 text-gray-400 border-gray-700 hover:border-gray-500'"
+            >
+              {{ form.features.includes(tag) ? '' : '+' }} {{ tag }}
+            </button>
+          </div>
+          <div class="flex gap-2">
+            <input
+              v-model="customTagInput"
+              type="text"
+              placeholder="Ajouter un tag personnalise"
+              class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary"
+              @keydown.enter.prevent="addCustomTag"
+            />
+            <button type="button" @click="addCustomTag" class="px-3 bg-gray-800 text-gray-400 hover:text-primary rounded-xl transition" title="Ajouter le tag">
+              <Plus class="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              @click="toggleDictation('customTag')"
+              class="px-3 rounded-xl transition"
+              :class="isDictating && dictationField === 'customTag' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+              title="Dicter un tag"
+            >
+              <MicOff v-if="isDictating && dictationField === 'customTag'" class="w-5 h-5" />
+              <Mic v-else class="w-5 h-5" />
+            </button>
+          </div>
+          <input v-model="tagsInput" type="text" placeholder="Tags separes par des virgules" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary mt-3" />
+          <div v-if="form.features.length" class="flex flex-wrap gap-1.5 mt-3">
+            <span v-for="(tag, idx) in form.features" :key="tag" class="bg-primary/20 text-primary text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
+              {{ tag }}
+              <button type="button" @click="removeTag(idx)" class="hover:text-red-300 transition">
+                <X class="w-3 h-3" />
+              </button>
+            </span>
+          </div>
+        </div>
+        <label class="w-full flex items-center justify-between bg-gray-900 border border-gray-700 rounded-xl p-4 cursor-pointer">
+          <span class="font-medium">Evenement Premium</span>
+          <input type="checkbox" v-model="form.isPremium" class="w-5 h-5 accent-primary" />
+        </label>
+        <input
+          v-if="form.isPremium"
+          v-model.number="form.price"
+          type="number"
+          min="0"
+          step="500"
+          placeholder="Prix premium CFA"
+          class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary"
+        />
+
         <label class="w-full flex items-center justify-between bg-gray-900 border border-gray-700 rounded-xl p-4 cursor-pointer">
           <span class="font-medium">Preparer la reservation</span>
           <input type="checkbox" v-model="form.ticketingEnabled" class="w-5 h-5 accent-primary" />
@@ -328,6 +626,49 @@ onMounted(() => {
         <div v-if="form.ticketingEnabled" class="grid grid-cols-2 gap-3">
           <input v-model.number="form.ticketPrice" type="number" min="0" step="500" placeholder="Prix CFA" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
           <input v-model.number="form.ticketCapacity" type="number" min="1" placeholder="Capacite" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+        </div>
+
+        <div class="space-y-2">
+          <label class="text-xs text-gray-400 font-medium flex items-center gap-1">
+            <Music class="w-3.5 h-3.5" />
+            Musique de fond YouTube
+          </label>
+          <input
+            v-model="form.backgroundMusic"
+            type="url"
+            placeholder="https://www.youtube.com/watch?v=... ou /shorts/..."
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary"
+          />
+          <div v-if="form.backgroundMusic && extractYouTubeId(form.backgroundMusic)" class="rounded-xl overflow-hidden border border-gray-700">
+            <iframe
+              :src="`https://www.youtube.com/embed/${extractYouTubeId(form.backgroundMusic)}?rel=0`"
+              class="w-full h-32"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
+          <p v-if="form.backgroundMusic && !extractYouTubeId(form.backgroundMusic)" class="text-red-400 text-xs">URL YouTube invalide. Formats acceptes : youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/...</p>
+        </div>
+
+        <div v-if="form.backgroundMusic && extractYouTubeId(form.backgroundMusic)" class="space-y-1">
+          <label class="text-xs text-gray-400 font-medium flex items-center gap-1">
+            Titre de la musique
+            <Loader2 v-if="isFetchingTitle" class="w-3 h-3 animate-spin text-primary" />
+          </label>
+          <div class="flex gap-2">
+            <input v-model="form.musicTitle" type="text" placeholder="Titre de la musique" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary" />
+            <button
+              type="button"
+              @click="toggleDictation('musicTitle')"
+              class="px-3 rounded-xl transition"
+              :class="isDictating && dictationField === 'musicTitle' ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-800 text-gray-400 hover:text-primary'"
+              title="Dicter le titre de la musique"
+            >
+              <MicOff v-if="isDictating && dictationField === 'musicTitle'" class="w-5 h-5" />
+              <Mic v-else class="w-5 h-5" />
+            </button>
+          </div>
         </div>
       </section>
 
@@ -343,8 +684,13 @@ onMounted(() => {
             <p class="text-primary text-sm">{{ new Date(form.date).toLocaleString('fr-FR') }}</p>
             <p class="text-gray-300 text-sm">{{ form.location }} - {{ form.district || form.city }}</p>
             <p class="text-gray-400 text-sm line-clamp-3">{{ form.description }}</p>
-            <div v-if="tagList.length" class="flex flex-wrap gap-2 pt-2">
-              <span v-for="tag in tagList" :key="tag" class="bg-white/10 text-white text-xs px-2 py-1 rounded-full">{{ tag }}</span>
+            <div class="flex flex-wrap gap-2 pt-2">
+              <span v-if="form.category" class="bg-white/10 text-white text-xs px-2 py-1 rounded-full">{{ form.category }}</span>
+              <span v-if="form.backgroundMusic" class="bg-primary/15 text-primary text-xs px-2 py-1 rounded-full">Musique</span>
+              <span v-if="form.isPremium" class="bg-amber-500/15 text-amber-300 text-xs px-2 py-1 rounded-full">Premium - {{ form.price || 0 }} CFA</span>
+            </div>
+            <div v-if="selectedTags.length" class="flex flex-wrap gap-2 pt-2">
+              <span v-for="tag in selectedTags" :key="tag" class="bg-white/10 text-white text-xs px-2 py-1 rounded-full">{{ tag }}</span>
             </div>
             <div v-if="form.ticketingEnabled" class="inline-flex items-center gap-1 bg-primary/20 text-primary text-xs px-2 py-1 rounded-full">
               <Ticket class="w-3 h-3" /> {{ form.ticketPrice || 0 }} CFA

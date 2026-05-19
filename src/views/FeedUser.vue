@@ -349,6 +349,8 @@ const feedItems = computed(() => {
     return items
 })
 
+const feedEventCount = computed(() => feedItems.value.filter(item => item.type === 'event').length)
+
 // Toast State
 const showToast = ref(false)
 const toastEvent = ref(null)
@@ -1295,6 +1297,27 @@ const getTikTokId = (url) => {
     return null
 }
 
+const getEventAudioUrl = (event) => {
+    if (!event) return ''
+    if (event.backgroundMusic) return event.backgroundMusic
+    if ((event.mediaType === 'youtube' || event.mediaType === 'youtube_short') && event.videoUrl) return event.videoUrl
+    return ''
+}
+
+const hasEventAudio = (event) => !!getYouTubeId(getEventAudioUrl(event))
+
+const getEventAudioTitle = (event) => {
+    if (!hasEventAudio(event)) return ''
+    return event.musicTitle || (event.backgroundMusic ? 'Musique de fond' : 'Son de la video')
+}
+
+const getEventVisualUrl = (event) => {
+    if (!event) return ''
+    if (event.image || event.mediaUrl) return event.image || event.mediaUrl
+    const videoId = getYouTubeId(event.videoUrl)
+    return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : ''
+}
+
 // --- Window helpers (non accessible dans le template Vue) ---
 const appOrigin = typeof window !== 'undefined' ? window.location.origin : ''
 
@@ -1526,34 +1549,44 @@ const handleDeleteEvent = async (eventId) => {
       </div>
     </Transition>
 
-    <!-- Header pill -->
-    <div class="header-tabs absolute top-0 w-full z-20 pt-12 pb-3 flex justify-center items-center pointer-events-auto">
-       <div class="flex items-center gap-2 bg-black/50 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10">
-            <img src="/appIcon.svg" alt="logo" class="w-5 h-5 opacity-90" />
-            <span class="text-white text-sm font-bold tracking-wide">{{ appName }}</span>
-            <div class="w-px h-4 bg-white/20 mx-1" />
-            <button
-                @click="activeTab = 'map'"
-                class="flex items-center gap-1 text-white/70 hover:text-white transition active:scale-95">
-                <Compass class="w-4 h-4" />
-                <span class="text-[10px]">Carte</span>
-            </button>
-       </div>
-    </div>
+    <!-- Feed header -->
+    <div class="feed-header absolute top-0 inset-x-0 z-40 pointer-events-none">
+      <div class="feed-header-inner">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0 flex flex-1 items-center gap-2 rounded-full border border-white/10 bg-black/45 py-1.5 pl-1.5 pr-3 shadow-lg shadow-black/20 backdrop-blur-md pointer-events-auto">
+            <img src="/appIcon.svg" alt="Babi Vibes" class="h-8 w-8 rounded-full shadow-md shadow-black/30" />
+            <div class="min-w-0">
+              <p class="truncate text-[13px] font-black leading-none text-white">{{ appName }}</p>
+              <p class="mt-0.5 text-[10px] font-semibold leading-none text-white/55">
+                {{ feedEventCount }} event{{ feedEventCount > 1 ? 's' : '' }}
+              </p>
+            </div>
+          </div>
 
-    <!-- Bouton FAB Filtres -->
-    <div class="absolute top-24 right-3 z-20 pointer-events-auto">
-      <button
-        @click="showFilterDrawer = true"
-        class="relative flex items-center gap-1.5 bg-black/60 backdrop-blur-md border border-white/15 text-white font-bold px-3 py-2 rounded-full text-xs transition active:scale-95 shadow-lg"
-      >
-        <SlidersHorizontal class="w-3.5 h-3.5" />
-        Filtres
-        <span
-          v-if="activeFilterCount > 0"
-          class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-primary text-black text-[9px] font-black rounded-full flex items-center justify-center"
-        >{{ activeFilterCount }}</span>
-      </button>
+          <div class="flex shrink-0 items-center gap-2 pointer-events-auto">
+            <button
+              @click="activeTab = 'map'"
+              aria-label="Ouvrir la carte"
+              title="Carte"
+              class="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-black/45 text-white shadow-lg shadow-black/20 backdrop-blur-md transition hover:bg-white/10 active:scale-95"
+            >
+              <Compass class="h-[18px] w-[18px]" />
+            </button>
+            <button
+              @click="showFilterDrawer = true"
+              :aria-label="activeFilterCount > 0 ? `${activeFilterCount} filtre actif` : 'Ouvrir les filtres'"
+              :aria-pressed="activeFilterCount > 0"
+              class="relative flex h-10 items-center gap-2 rounded-full border px-3 text-xs font-black shadow-lg shadow-black/20 backdrop-blur-md transition active:scale-95"
+              :class="activeFilterCount > 0
+                ? 'border-primary bg-primary text-black'
+                : 'border-white/10 bg-black/45 text-white hover:bg-white/10'"
+            >
+              <SlidersHorizontal class="h-4 w-4" />
+              <span>{{ activeFilterCount > 0 ? `${activeFilterCount} actif${activeFilterCount > 1 ? 's' : ''}` : 'Filtres' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Drawer filtres -->
@@ -1713,42 +1746,25 @@ const handleDeleteEvent = async (eventId) => {
         <div class="absolute inset-0 bg-gray-900">
            <!-- Image de couverture (toujours présente en base, même derrière une vidéo) -->
            <img
-             v-if="item.data.image"
-             :src="item.data.image"
+             v-if="getEventVisualUrl(item.data)"
+             :src="getEventVisualUrl(item.data)"
              alt="Event Cover"
              class="absolute inset-0 w-full h-full object-cover opacity-90"
            />
            <div v-else class="absolute inset-0 w-full h-full bg-gradient-to-br from-primary/30 via-gray-900 to-gray-800"></div>
            <!-- YouTube Video Background (plein écran, par-dessus l'image) -->
-           <iframe
-             v-if="hasInteracted && (item.data.mediaType === 'youtube' || item.data.mediaType === 'youtube_short') && item.data.videoUrl && getYouTubeId(item.data.videoUrl)"
-             :src="`https://www.youtube.com/embed/${getYouTubeId(item.data.videoUrl)}?autoplay=${itemIndex === currentSlideIndex ? 1 : 0}&mute=1&loop=1&playlist=${getYouTubeId(item.data.videoUrl)}&controls=0&showinfo=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(appOrigin)}`"
-             class="absolute inset-0 w-full h-full border-0 pointer-events-none z-[1]"
-             :style="item.data.mediaType === 'youtube' ? 'transform: scale(1.5);' : ''"
-             frameborder="0"
-             allow="autoplay; encrypted-media"
-             :loading="itemIndex < 3 ? 'eager' : 'lazy'"
-           ></iframe>
            <!-- TikTok Video Background (embed, par-dessus l'image) -->
-           <iframe
-             v-if="hasInteracted && item.data.mediaType === 'tiktok' && item.data.videoUrl && getTikTokId(item.data.videoUrl)"
-             :src="`https://www.tiktok.com/embed/v2/${getTikTokId(item.data.videoUrl)}?lang=fr`"
-             class="absolute inset-0 w-full h-full border-0 z-[1]"
-             frameborder="0"
-             allow="autoplay; encrypted-media"
-             :loading="itemIndex < 3 ? 'eager' : 'lazy'"
-           ></iframe>
            <!-- YouTube Background AUDIO (iframe caché pour musique de fond, séparé de la vidéo d'illustration) -->
            <iframe 
-             v-if="hasInteracted && item.data.backgroundMusic && getYouTubeId(item.data.backgroundMusic) && !(item.data.mediaType === 'youtube' || item.data.mediaType === 'youtube_short')"
-             :src="`https://www.youtube.com/embed/${getYouTubeId(item.data.backgroundMusic)}?autoplay=${itemIndex === 0 ? 1 : 0}&mute=${itemIndex === 0 ? 0 : 1}&loop=1&playlist=${getYouTubeId(item.data.backgroundMusic)}&controls=0&showinfo=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(appOrigin)}`"
+             v-if="hasInteracted && hasEventAudio(item.data)"
+             :src="`https://www.youtube.com/embed/${getYouTubeId(getEventAudioUrl(item.data))}?autoplay=${itemIndex === currentSlideIndex ? 1 : 0}&mute=${isMuted ? 1 : 0}&loop=1&playlist=${getYouTubeId(getEventAudioUrl(item.data))}&controls=0&showinfo=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(appOrigin)}`"
              class="absolute pointer-events-none"
              style="width:1px;height:1px;opacity:0;position:absolute;bottom:0;left:0;"
              frameborder="0"
              allow="autoplay; encrypted-media"
              :loading="itemIndex < 3 ? 'eager' : 'lazy'"
            ></iframe>
-           <div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black" :class="{ 'pointer-events-none': item.data.mediaType === 'tiktok' }"></div>
+           <div class="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black pointer-events-none"></div>
            <div class="absolute bottom-0 left-0 right-0 h-[75%] bg-gradient-to-t from-black via-black/95 to-transparent pointer-events-none"></div>
         </div>
 
@@ -1854,16 +1870,21 @@ const handleDeleteEvent = async (eventId) => {
              <span class="action-button-text text-xs font-semibold drop-shadow-md">Partager</span>
            </button>
 
-           <button @click="openReport(item.data)" class="action-button flex flex-col items-center gap-1 group">
-             <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
-               <Flag class="w-5 h-5 text-orange-400"/>
+           <button
+             @click="openReport(item.data)"
+             class="action-button mt-1 flex flex-col items-center gap-1 opacity-55 transition hover:opacity-100 active:scale-95"
+             aria-label="Signaler cet evenement"
+             title="Signaler"
+           >
+             <div class="w-8 h-8 rounded-full bg-black/25 border border-white/10 backdrop-blur-sm flex items-center justify-center">
+               <Flag class="w-4 h-4 text-white/65"/>
              </div>
-             <span class="action-button-text text-xs font-semibold drop-shadow-md text-orange-400">Signaler</span>
+             <span class="sr-only">Signaler</span>
            </button>
 
            <!-- Mute / Unmute Button -->
            <button
-             v-if="item.data.backgroundMusic && getYouTubeId(item.data.backgroundMusic)"
+             v-if="hasEventAudio(item.data)"
              @click="toggleMute"
              class="action-button flex flex-col items-center gap-1 group"
            >
@@ -1878,8 +1899,8 @@ const handleDeleteEvent = async (eventId) => {
            <!-- Spinning Disc (TikTok Vibe) -->
            <div class="mt-4 relative">
               <div class="w-12 h-12 rounded-full bg-black border-[3px] border-dark-lighter flex items-center justify-center overflow-hidden"
-                   :class="(itemIndex === currentSlideIndex && !isMuted && item.data.backgroundMusic) ? 'animate-spin-slow' : ''">
-                 <img :src="item.data.image" class="w-full h-full object-cover opacity-80" />
+                   :class="(itemIndex === currentSlideIndex && !isMuted && hasEventAudio(item.data)) ? 'animate-spin-slow' : ''">
+                 <img :src="getEventVisualUrl(item.data)" class="w-full h-full object-cover opacity-80" />
               </div>
               <!-- Floating Notes Animation would go here -->
            </div>
@@ -1932,11 +1953,11 @@ const handleDeleteEvent = async (eventId) => {
 
           <!-- Music Ticker -->
           <div class="music-ticker flex items-center gap-2 w-[70%] overflow-hidden pointer-events-auto">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 fill-white flex-shrink-0" :class="item.data.backgroundMusic ? 'animate-spin-slow' : 'animate-pulse'" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 fill-white flex-shrink-0" :class="hasEventAudio(item.data) ? 'animate-spin-slow' : 'animate-pulse'" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
               <div class="whitespace-nowrap animate-marquee text-xs font-medium">
-                  <span v-if="item.data.backgroundMusic" class="mr-4">{{ item.data.musicTitle || 'Musique de fond' }}</span>
-                  <span v-if="item.data.backgroundMusic" class="mr-4">{{ item.data.musicTitle || 'Musique de fond' }}</span>
-                  <template v-if="!item.data.backgroundMusic">
+                  <span v-if="hasEventAudio(item.data)" class="mr-4">{{ getEventAudioTitle(item.data) }}</span>
+                  <span v-if="hasEventAudio(item.data)" class="mr-4">{{ getEventAudioTitle(item.data) }}</span>
+                  <template v-if="!hasEventAudio(item.data)">
                     <span v-if="item.data.organizer || item.data.organizerName" class="mr-4">{{ item.data.organizer || item.data.organizerName }}</span>
                     <span v-if="item.data.organizer || item.data.organizerName" class="mr-4">{{ item.data.organizer || item.data.organizerName }}</span>
                   </template>
@@ -2580,7 +2601,7 @@ const handleDeleteEvent = async (eventId) => {
             </div>
         </div>
     </transition>
-    <div class="bottom-nav fixed bottom-0 w-full z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around items-center h-16 border-t border-gray-200 dark:border-white/10 pb-safe transition-colors duration-300">
+    <div class="bottom-nav app-bottom-nav fixed bottom-0 inset-x-0 z-50 bg-white dark:bg-black text-gray-900 dark:text-white flex justify-around border-t border-gray-200 dark:border-white/10 transition-colors duration-300">
         <button 
             @click="activeTab = 'feed'"
             class="flex flex-col items-center gap-1 transition"
@@ -2949,6 +2970,17 @@ const handleDeleteEvent = async (eventId) => {
 }
 .text-shadow {
     text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+.feed-header {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+.feed-header-inner {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding-inline: 0.75rem;
 }
 
 /* Toast animations */
