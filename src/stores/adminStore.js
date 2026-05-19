@@ -1,69 +1,74 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
+import { supabase } from '../services/supabase'
 
-// Static helper function for checking session validity (used by route guards)
-export const checkAdminSession = () => {
-    const stored = localStorage.getItem('pdvstar_admin_session')
-    if (stored) {
-        const session = JSON.parse(stored)
-        // Check if authenticated and not expired
-        if (session.isAuthenticated && session.expiry && Date.now() <= session.expiry) {
-            return true
-        }
+/**
+ * Vérifie la session admin : token Supabase valide + role=admin dans public.users
+ */
+export const checkAdminSession = async () => {
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return false
+        const { data } = await supabase
+            .from('users')
+            .select('role, role_v2')
+            .eq('id', session.user.id)
+            .single()
+        return data?.role === 'admin' || data?.role_v2 === 'admin'
+    } catch {
+        return false
     }
-    return false
 }
 
 export const useAdminStore = defineStore('admin', () => {
-    // Admin credentials - Note: Hardcoded as per requirement (login: admin, password: admin)
-    // In production, this should use environment variables and proper backend authentication
-    const ADMIN_USERNAME = 'admin'
-    const ADMIN_PASSWORD = 'admin'
-
-    // Load session from localStorage
-    const loadSession = () => {
-        const stored = localStorage.getItem('pdvstar_admin_session')
-        if (stored) {
-            const session = JSON.parse(stored)
-            // Check expiry (24 hours for admin)
-            if (session.expiry && Date.now() > session.expiry) {
-                localStorage.removeItem('pdvstar_admin_session')
-                return null
-            }
-            return session.isAuthenticated ? true : null
-        }
-        return null
-    }
-
-    const isAuthenticated = ref(loadSession() || false)
+    const isAuthenticated = ref(false)
     const loginError = ref('')
 
-    const login = (username, password) => {
-        loginError.value = ''
-        
-        if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    // Restaure la session au chargement
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (!session) return
+        const { data } = await supabase
+            .from('users')
+            .select('role, role_v2')
+            .eq('id', session.user.id)
+            .single()
+        if (data?.role === 'admin' || data?.role_v2 === 'admin') {
             isAuthenticated.value = true
-            const session = {
-                isAuthenticated: true,
-                expiry: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
-            }
-            localStorage.setItem('pdvstar_admin_session', JSON.stringify(session))
-            return true
-        } else {
+        }
+    })
+
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT' || !session) isAuthenticated.value = false
+    })
+
+    const login = async (email, password) => {
+        loginError.value = ''
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) {
             loginError.value = 'Identifiants incorrects'
             return false
         }
+        // Vérification du rôle admin dans public.users
+        const { data: profile } = await supabase
+            .from('users')
+            .select('role, role_v2')
+            .eq('id', data.user.id)
+            .single()
+        if (profile?.role !== 'admin' && profile?.role_v2 !== 'admin') {
+            await supabase.auth.signOut()
+            loginError.value = 'Accès refusé : compte non administrateur'
+            return false
+        }
+        isAuthenticated.value = true
+        return true
     }
 
-    const logout = () => {
+    const logout = async () => {
         isAuthenticated.value = false
-        localStorage.removeItem('pdvstar_admin_session')
+        await supabase.auth.signOut()
     }
 
-    return {
-        isAuthenticated,
-        loginError,
-        login,
-        logout
-    }
+    return { isAuthenticated, loginError, login, logout }
 })
+
+

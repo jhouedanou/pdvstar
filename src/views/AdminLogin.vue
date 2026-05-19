@@ -2,28 +2,20 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAdminStore } from '../stores/adminStore'
-import { Lock, User, LogIn } from 'lucide-vue-next'
+import { Lock, Mail, LogIn } from 'lucide-vue-next'
 
 const router = useRouter()
 const adminStore = useAdminStore()
 
-const username = ref('')
+const email = ref('')
 const password = ref('')
 const isLoading = ref(false)
 
 const handleLogin = async () => {
     isLoading.value = true
-    
-    // Small delay for UX
-    await new Promise(resolve => setTimeout(resolve, 300))
-    
-    const success = adminStore.login(username.value, password.value)
-    
+    const success = await adminStore.login(email.value, password.value)
     isLoading.value = false
-    
-    if (success) {
-        router.push('/admin/dashboard')
-    }
+    if (success) router.push('/admin/dashboard')
 }
 </script>
 
@@ -40,13 +32,14 @@ const handleLogin = async () => {
       <h2 class="text-xl font-bold text-white mb-6 text-center">Connexion Admin</h2>
 
       <form @submit.prevent="handleLogin" class="space-y-4">
-        <!-- Username -->
+        <!-- Email -->
         <div class="relative">
-          <User class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+          <Mail class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
           <input
-            v-model="username"
-            type="text"
-            placeholder="Identifiant"
+            v-model="email"
+            type="email"
+            placeholder="Email administrateur"
+            autocomplete="email"
             class="w-full bg-gray-900 text-white pl-10 pr-4 py-3 rounded-xl border border-gray-700 focus:border-primary focus:outline-none transition"
             required
           />

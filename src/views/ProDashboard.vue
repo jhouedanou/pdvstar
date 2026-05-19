@@ -9,7 +9,7 @@ import UserProfileModal from '../components/UserProfileModal.vue'
 import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, MapPin,
   Check, X, Loader2, Store, Megaphone, Clock,
-  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle
+  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle, LogOut
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
 import { fetchEventStats } from '../services/statsService'
@@ -339,6 +339,14 @@ const formatDate = (dateStr) => {
             <ArrowLeft class="w-4 h-4" />
             Retour
           </router-link>
+          <button
+            @click="() => { userStore.logout(); router.push('/') }"
+            class="text-gray-400 text-sm hover:text-red-400 transition flex items-center gap-1 ml-3"
+            title="Se déconnecter"
+          >
+            <LogOut class="w-4 h-4" />
+            Déconnexion
+          </button>
         </div>
       </header>
 

@@ -66,17 +66,22 @@ export const useEventStore = defineStore('events', () => {
             if (supaEvents.length > 0) {
                 events.value = dedup(enrichWithCategories(supaEvents))
             } else {
-                // Table vide → seed avec les données locales
-                console.log(' Table Supabase vide, insertion des données seed...')
-                db.seedEvents()
-                const localEvents = db.getEvents()
-                const seeded = await supaSeedEvents(localEvents)
-                if (seeded.length > 0) {
-                    events.value = dedup(enrichWithCategories(seeded))
-                    console.log(` ${seeded.length} événements insérés dans Supabase`)
+                // Table vide → seed avec les données locales (dev uniquement)
+                if (import.meta.env.PROD) {
+                    console.warn('[Babi Vibes] Table events vide en production. Auto-seed désactivé.')
+                    events.value = []
                 } else {
-                    console.warn('️ Seed Supabase échoué, utilisation des données locales')
-                    events.value = dedup(localEvents)
+                    console.log(' Table Supabase vide, insertion des données seed...')
+                    db.seedEvents()
+                    const localEvents = db.getEvents()
+                    const seeded = await supaSeedEvents(localEvents)
+                    if (seeded.length > 0) {
+                        events.value = dedup(enrichWithCategories(seeded))
+                        console.log(` ${seeded.length} événements insérés dans Supabase`)
+                    } else {
+                        console.warn('️ Seed Supabase échoué, utilisation des données locales')
+                        events.value = dedup(localEvents)
+                    }
                 }
             }
         } catch (error) {

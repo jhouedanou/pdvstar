@@ -77,15 +77,15 @@ const hasRole = (allowed) => {
 }
 
 // Navigation guards : admin OU rôles applicatifs
-router.beforeEach((to, from, next) => {
-    // Routes admin : accès réservé aux admins authentifiés
+router.beforeEach(async (to, from, next) => {
     if (to.meta.requiresAdmin) {
-        if (checkAdminSession() || hasRole(['admin'])) return next()
+        const ok = await checkAdminSession()
+        if (ok || hasRole(['admin'])) return next()
         return next('/admin')
     }
-    // Routes organisateur : si admin authentifié, le rediriger vers son espace admin
     if (to.meta.requiresRole) {
-        if (checkAdminSession()) return next('/admin/dashboard')
+        const ok = await checkAdminSession()
+        if (ok) return next('/admin/dashboard')
         if (hasRole(to.meta.requiresRole)) return next()
         return next('/admin')
     }

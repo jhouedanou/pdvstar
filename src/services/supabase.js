@@ -1,7 +1,17 @@
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://zbowizpdsekljkudfjgx.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpib3dpenBkc2VrbGprdWRmamd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyMzQ2NTksImV4cCI6MjA4NjgxMDY1OX0.YaJDKg6arHwbkVCr1qZc9aDK2jrxxFv3SiRpqxGFKLY'
+// Supporte les deux noms : ANON_KEY (legacy) et PUBLISHABLE_KEY (nouvelle nomenclature Supabase)
+const supabaseAnonKey =
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+
+if (!supabaseAnonKey) {
+    throw new Error(
+        '[Babi Vibes] Clé Supabase manquante. ' +
+        'Définissez VITE_SUPABASE_ANON_KEY ou VITE_SUPABASE_PUBLISHABLE_KEY dans .env.local (voir .env.example).'
+    )
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
