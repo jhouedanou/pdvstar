@@ -16,8 +16,8 @@ import LegalPages from './views/LegalPages.vue'
 
 const routes = [
     { path: '/', component: FeedUser }, // Default to User Feed
-    { path: '/pro', component: ProDashboard },
-    { path: '/pro/create', component: CreateEventWizard },
+    { path: '/pro', component: ProDashboard, meta: { requiresRole: ['organizer', 'admin'] } },
+    { path: '/pro/create', component: CreateEventWizard, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/admin', component: AdminLogin },
     { path: '/admin/dashboard', component: AdminDashboard, meta: { requiresAdmin: true } },
     { path: '/admin/ads', component: AdsDashboard, meta: { requiresAdmin: true } },
@@ -29,31 +29,38 @@ const router = createRouter({
     routes,
 })
 
-// Check if user is organizer from session
-const checkOrganizerSession = () => {
+// Lit le rôle du user en session
+const getSessionRole = () => {
     const stored = localStorage.getItem('pdvstar_session_user')
-    if (stored) {
-        try {
-            const session = JSON.parse(stored)
-            if (session.user && session.expiry && Date.now() <= session.expiry) {
-                return session.user.role === 'organizer' || session.user.role === 'admin'
-            }
-        } catch (e) { /* ignore */ }
-    }
-    return false
+    if (!stored) return null
+    try {
+        const session = JSON.parse(stored)
+        if (session.user && session.expiry && Date.now() <= session.expiry) {
+            // Normalise role legacy 'user' -> 'consumer'
+            const r = session.user.role
+            if (r === 'user' || !r) return 'consumer'
+            return r
+        }
+    } catch (e) { /* ignore */ }
+    return null
 }
 
-// Navigation guard for admin routes (admin OR organizer)
+const hasRole = (allowed) => {
+    const r = getSessionRole()
+    return r && allowed.includes(r)
+}
+
+// Navigation guards : admin OU rôles applicatifs
 router.beforeEach((to, from, next) => {
     if (to.meta.requiresAdmin) {
-        if (checkAdminSession() || checkOrganizerSession()) {
-            next()
-        } else {
-            next('/admin')
-        }
-    } else {
-        next()
+        if (checkAdminSession() || hasRole(['organizer', 'admin'])) return next()
+        return next('/admin')
     }
+    if (to.meta.requiresRole) {
+        if (checkAdminSession() || hasRole(to.meta.requiresRole)) return next()
+        return next('/admin')
+    }
+    next()
 })
 
 const pinia = createPinia()

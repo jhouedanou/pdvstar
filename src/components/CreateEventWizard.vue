@@ -5,7 +5,8 @@ import { useGeolocation } from '@vueuse/core'
 import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { processImage } from '../utils/imageUpload'
-import { Camera, Mic, MapPin, Check, ArrowRight, Loader2, Calendar, FileText, Type } from 'lucide-vue-next'
+import { Camera, Mic, MapPin, Check, ArrowRight, Loader2, Calendar, FileText, Type, Sparkles } from 'lucide-vue-next'
+import { generateEventDescription } from '../services/aiService'
 
 const router = useRouter()
 const store = useEventStore()
@@ -33,6 +34,29 @@ const form = ref({
 
 const isRecording = ref(false)
 const isTranscribing = ref(false)
+const isGeneratingDesc = ref(false)
+const aiError = ref('')
+
+const generateDescription = async () => {
+    if (!form.value.title) {
+        aiError.value = 'Saisis un titre avant de générer'
+        return
+    }
+    isGeneratingDesc.value = true
+    aiError.value = ''
+    try {
+        const desc = await generateEventDescription({
+            title: form.value.title,
+            date: form.value.date,
+            location: 'Abidjan'
+        })
+        if (desc) form.value.description = desc
+    } catch (e) {
+        aiError.value = e.message || 'Erreur génération IA'
+    } finally {
+        isGeneratingDesc.value = false
+    }
+}
 
 // Step 1: Media (avec validation securisee)
 const handleFileChange = async (e) => {
@@ -177,6 +201,11 @@ onMounted(() => {
                     <Mic class="w-6 h-6" />
                 </button>
             </div>
+            <button @click="generateDescription" :disabled="isGeneratingDesc" class="mt-3 flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 disabled:opacity-50">
+                <Sparkles class="w-4 h-4" />
+                <span>{{ isGeneratingDesc ? 'Génération…' : 'Générer avec l\'IA' }}</span>
+            </button>
+            <p v-if="aiError" class="text-red-500 text-xs mt-1">{{ aiError }}</p>
         </div>
 
         <!-- Step 5: Review -->

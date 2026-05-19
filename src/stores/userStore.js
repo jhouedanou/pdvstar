@@ -123,8 +123,11 @@ export const useUserStore = defineStore('user', () => {
     })
 
     const isProfileComplete = computed(() => {
-        return user.value && user.value.name && user.value.phone
+        return user.value && (user.value.pseudo || user.value.name) && user.value.phone
     })
+
+    const isConsumer = computed(() => user.value?.role === 'consumer' || user.value?.role === 'user' || !user.value?.role)
+    const isAdmin = computed(() => user.value?.role === 'admin')
 
     /**
      * Login OR Register via Supabase, avec fallback local
@@ -142,13 +145,15 @@ export const useUserStore = defineStore('user', () => {
                 currentUser = existingUser
             } else {
                 // Register — créer un nouvel utilisateur dans Supabase
+                const pseudo = profileData.pseudo || profileData.name || `Utilisateur ${profileData.phone}`
                 currentUser = await supaCreateUser({
-                    name: profileData.name || `Utilisateur ${profileData.phone}`,
+                    name: profileData.name || pseudo,
+                    pseudo,
                     phone: profileData.phone,
                     email: profileData.email || '',
                     avatar: profileData.avatar || null,
                     following: [],
-                    role: 'user'
+                    role: 'consumer'
                 })
             }
         } catch (error) {
@@ -276,6 +281,8 @@ export const useUserStore = defineStore('user', () => {
         isLoading,
         isProfileComplete,
         isOrganizer,
+        isConsumer,
+        isAdmin,
         // Passes
         activePass,
         passHistory,

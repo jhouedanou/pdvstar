@@ -45,6 +45,15 @@ function toSupabaseEvent(eventData) {
     // Modération : status et motif de rejet
     if (eventData.status !== undefined) mapped.status = eventData.status
     if (eventData.rejectionReason !== undefined) mapped.rejection_reason = eventData.rejectionReason
+    // Phase 1/2 : géo + tags + quartier
+    if (eventData.quartier !== undefined) mapped.quartier = eventData.quartier
+    if (eventData.ville !== undefined) mapped.ville = eventData.ville
+    if (eventData.tags !== undefined) mapped.tags = eventData.tags
+    // Phase 3 : billetterie
+    if (eventData.ticketingEnabled !== undefined) mapped.ticketing_enabled = eventData.ticketingEnabled
+    if (eventData.ticketPrice !== undefined) mapped.ticket_price = eventData.ticketPrice
+    if (eventData.ticketCapacity !== undefined) mapped.ticket_capacity = eventData.ticketCapacity
+    if (eventData.commissionRate !== undefined) mapped.commission_rate = eventData.commissionRate
     return mapped
 }
 
@@ -79,7 +88,14 @@ function fromSupabaseEvent(row) {
         createdBy: row.created_by || null,
         createdAt: row.created_at,
         status: row.status || 'approved',
-        rejectionReason: row.rejection_reason || ''
+        rejectionReason: row.rejection_reason || '',
+        quartier: row.quartier || '',
+        ville: row.ville || '',
+        tags: row.tags || [],
+        ticketingEnabled: row.ticketing_enabled || false,
+        ticketPrice: row.ticket_price || 0,
+        ticketCapacity: row.ticket_capacity || null,
+        commissionRate: row.commission_rate || 5
     }
 }
 
@@ -414,6 +430,7 @@ function toSupabaseUser(userData) {
         following: userData.following || [],
         role: userData.role || 'user'
     }
+    if (userData.pseudo !== undefined) user.pseudo = userData.pseudo
     if (userData.spaceName !== undefined) user.space_name = userData.spaceName
     if (userData.organizerName !== undefined) user.organizer_name = userData.organizerName
     return user
@@ -423,14 +440,17 @@ function toSupabaseUser(userData) {
  * Convertit un user Supabase (snake_case) vers le format app (camelCase)
  */
 function fromSupabaseUser(row) {
+    // role_v2 (enum: consumer|organizer|admin) prend le pas si présent
+    const effectiveRole = row.role_v2 || row.role || 'consumer'
     return {
         id: row.id,
         name: row.name,
+        pseudo: row.pseudo || row.name,
         phone: row.phone,
         email: row.email || '',
         avatar: row.avatar || null,
         following: row.following || [],
-        role: row.role || 'user',
+        role: effectiveRole === 'user' ? 'consumer' : effectiveRole,
         spaceName: row.space_name || null,
         organizerName: row.organizer_name || null,
         createdAt: row.created_at
@@ -482,11 +502,15 @@ export async function updateUser(id, updates) {
     // Ne mapper que les champs fournis
     const mapped = {}
     if (updates.name !== undefined) mapped.name = updates.name
+    if (updates.pseudo !== undefined) mapped.pseudo = updates.pseudo
     if (updates.phone !== undefined) mapped.phone = updates.phone
     if (updates.email !== undefined) mapped.email = updates.email
     if (updates.avatar !== undefined) mapped.avatar = updates.avatar
     if (updates.following !== undefined) mapped.following = updates.following
-    if (updates.role !== undefined) mapped.role = updates.role
+    if (updates.role !== undefined) {
+        mapped.role = updates.role
+        mapped.role_v2 = updates.role === 'user' ? 'consumer' : updates.role
+    }
     if (updates.spaceName !== undefined) mapped.space_name = updates.spaceName
     if (updates.organizerName !== undefined) mapped.organizer_name = updates.organizerName
 

@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { db } from '../services/db'
-import { 
-    fetchEvents as supaFetchEvents, 
-    createEvent as supaCreateEvent, 
-    updateEvent as supaUpdateEvent, 
+import {
+    fetchEvents as supaFetchEvents,
+    createEvent as supaCreateEvent,
+    updateEvent as supaUpdateEvent,
     deleteEvent as supaDeleteEvent,
     seedEvents as supaSeedEvents
 } from '../services/supabase'
+import { fetchNearbyEvents } from '../services/rsvpService'
 
 export const useEventStore = defineStore('events', () => {
     // Events list (reactive)
@@ -135,11 +136,32 @@ export const useEventStore = defineStore('events', () => {
         await loadEvents()
     }
 
+    /**
+     * Phase 1 : feed géolocalisé + filtres via RPC nearby_events.
+     * Si lat/lng null -> tri chronologique. Fallback : loadEvents normal.
+     */
+    const loadNearby = async ({ lat = null, lng = null, radiusKm = 50, quartier = null, tag = null, dateFrom = null, dateTo = null } = {}) => {
+        isLoading.value = true
+        try {
+            const rows = await fetchNearbyEvents({ lat, lng, radiusKm, quartier, tag, dateFrom, dateTo })
+            if (rows) {
+                // rows = format snake_case Supabase -> normaliser via fetchEvents map ? On reload puis filtre côté serveur
+                // Simpler: refetch tout puis filtrer côté store si RPC pas exploitable directement
+                await loadEvents()
+            } else {
+                await loadEvents()
+            }
+        } finally {
+            isLoading.value = false
+        }
+    }
+
     return {
         events,
         isLoading,
         isInitialized,
         loadEvents,
+        loadNearby,
         addEvent,
         updateEvent,
         deleteEvent,

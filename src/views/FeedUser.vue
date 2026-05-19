@@ -16,6 +16,7 @@ import L from 'leaflet'
 import { sendEventNotification, sendWhatsAppLocation } from '../services/greenApiService'
 import { db } from '../services/db'
 import { fetchActiveAds } from '../services/supabase'
+import { createRsvp, deleteRsvp, markRsvpNotified } from '../services/rsvpService'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -797,30 +798,47 @@ const handleJyVais = async (event) => {
             isRegistered: true,
             participantCount: event.participantCount + 1
         })
+
+        // Persist structured RSVP (Phase 1)
+        const pseudo = userStore.user.pseudo || userStore.user.name || 'Utilisateur'
+        let rsvp = null
+        try {
+            rsvp = await createRsvp({
+                eventId: event.id,
+                userId: userStore.user.id,
+                pseudo,
+                phone: userStore.user.phone,
+                source: 'app'
+            })
+        } catch (err) {
+            console.error('RSVP persist failed', err)
+        }
+
         messageSuccess.value = `✅ Inscription confirmée !`
-        
+
         // Send WhatsApp Notification
         if (userStore.user && userStore.user.phone) {
             sendingMessage.value = true
             try {
-                // Determine user name
-                const userName = userStore.user.name || 'Utilisateur'
-                await sendEventNotification(event, userName, userStore.user.phone)
+                await sendEventNotification(event, pseudo, userStore.user.phone)
+                if (rsvp?.id) markRsvpNotified(rsvp.id)
                 messageSuccess.value = `✅ Inscription confirmée ! Notification envoyée 📱`
             } catch (err) {
                 console.error('Notification failed', err)
-                // Don't block UI for this, but maybe show warning?
             } finally {
                 sendingMessage.value = false
             }
         }
-        
+
     } else {
         // Toggle off
         await eventStore.updateEvent(event.id, {
             isRegistered: false,
             participantCount: Math.max(0, event.participantCount - 1)
         })
+        if (userStore.user?.phone) {
+            deleteRsvp(event.id, userStore.user.phone).catch(() => {})
+        }
         messageSuccess.value = `Inscription annulée.`
     }
     
