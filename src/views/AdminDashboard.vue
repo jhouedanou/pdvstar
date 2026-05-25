@@ -1371,8 +1371,8 @@ watch(() => form.value.backgroundMusic, (newUrl) => {
           <button @click="loadUsers" class="text-xs text-slate-400 hover:text-white transition">Actualiser</button>
         </div>
         <div v-if="usersLoading" class="text-slate-500 text-sm py-6 text-center">Chargement...</div>
-        <div v-else class="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden">
-          <table class="w-full text-sm">
+        <div v-else class="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-x-auto">
+          <table class="min-w-[620px] w-full text-sm">
             <thead>
               <tr class="border-b border-slate-700/50 text-xs text-slate-400 uppercase tracking-wider">
                 <th class="px-4 py-2.5 text-left">Pseudo</th>

@@ -76,7 +76,7 @@ onMounted(load)
     </div>
 
     <!-- Stat cards -->
-    <div class="grid grid-cols-4 gap-3 mb-6">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <button @click="roleFilter = 'all'" class="text-left bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 rounded-xl p-3 transition"
         :class="roleFilter === 'all' ? 'ring-1 ring-blue-500' : ''">
         <p class="text-2xl font-bold text-white">{{ counts.total }}</p>
@@ -115,8 +115,52 @@ onMounted(load)
       <p class="text-sm">Aucun utilisateur</p>
     </div>
 
-    <!-- Table -->
-    <div v-else class="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden">
+    <!-- Liste mobile + table desktop -->
+    <div v-else>
+      <div class="space-y-3 sm:hidden">
+        <article
+          v-for="u in filtered"
+          :key="u.id"
+          class="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4"
+        >
+          <div class="mb-3 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="truncate font-medium text-white">{{ u.pseudo || u.name || 'Anonyme' }}</p>
+              <p class="mt-0.5 text-xs text-slate-500">{{ u.phone || 'Téléphone non renseigné' }}</p>
+              <p v-if="u.email" class="truncate text-xs text-slate-500">{{ u.email }}</p>
+            </div>
+            <span class="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium"
+              :class="{
+                'bg-purple-500/20 text-purple-300': u.role === 'admin',
+                'bg-blue-500/20 text-blue-300': u.role === 'organizer',
+                'bg-slate-600/40 text-slate-300': !u.role || u.role === 'consumer' || u.role === 'user'
+              }">
+              {{ u.role === 'user' ? 'consumer' : (u.role || 'consumer') }}
+            </span>
+          </div>
+          <div class="grid grid-cols-2 gap-2" v-if="updating !== u.id && deleting !== u.id">
+            <button v-if="u.role !== 'organizer'" @click="setRole(u, 'organizer')"
+              class="text-xs px-2 py-2 bg-blue-500/20 text-blue-300 hover:bg-blue-500/40 rounded-lg transition flex items-center justify-center gap-1">
+              <Store class="w-3 h-3" /> Organizer
+            </button>
+            <button v-if="u.role !== 'consumer' && u.role !== 'user'" @click="setRole(u, 'consumer')"
+              class="text-xs px-2 py-2 bg-slate-600/40 text-slate-300 hover:bg-slate-600/60 rounded-lg transition flex items-center justify-center gap-1">
+              <User class="w-3 h-3" /> Consumer
+            </button>
+            <button v-if="u.role !== 'admin'" @click="setRole(u, 'admin')"
+              class="text-xs px-2 py-2 bg-purple-500/20 text-purple-300 hover:bg-purple-500/40 rounded-lg transition flex items-center justify-center gap-1">
+              <Shield class="w-3 h-3" /> Admin
+            </button>
+            <button @click="remove(u)"
+              class="text-xs px-2 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/40 rounded-lg transition flex items-center justify-center gap-1">
+              <Trash2 class="w-3 h-3" /> Supprimer
+            </button>
+          </div>
+          <p v-else class="text-xs text-slate-500">Mise à jour...</p>
+        </article>
+      </div>
+
+      <div class="hidden sm:block bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-slate-700/50 text-xs text-slate-400 uppercase tracking-wider">
@@ -167,6 +211,7 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 </template>

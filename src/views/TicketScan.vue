@@ -5,7 +5,7 @@ import { useUserStore } from '../stores/userStore'
 import { useEventStore } from '../stores/eventStore'
 import { redeemTicket, fetchTicketsForEvent } from '../services/ticketService'
 import { checkInRsvpByQr, listRsvpsForEvent } from '../services/rsvpService'
-import { ArrowLeft, ScanLine, CheckCircle2, XCircle, RotateCcw, Ticket, Users, Calendar, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, ScanLine, CheckCircle2, XCircle, RotateCcw, Ticket, Users, Calendar, RefreshCw, Flashlight } from 'lucide-vue-next'
 import { QrcodeStream } from 'vue-qrcode-reader'
 
 const route = useRoute()
@@ -23,6 +23,8 @@ const cameraReady = ref(false)
 const lastResult = ref(null)
 const error = ref('')
 const scanning = ref(true)
+const torchEnabled = ref(false)
+const torchSupported = ref(false)
 
 // Ticket/RSVP counts for this event
 const tickets = ref([])
@@ -61,6 +63,43 @@ onMounted(async () => {
     if (eventId.value) loadCounts()
 })
 
+const onCameraOn = (capabilities) => {
+    torchSupported.value = !!capabilities?.torch
+}
+
+const onCameraError = (err) => {
+    error.value = `Caméra inaccessible : ${err.message || err.name || 'erreur inconnue'}`
+}
+
+const toggleTorch = () => {
+    if (!torchSupported.value) {
+        error.value = "Lampe indisponible sur cet appareil ou ce navigateur."
+        setTimeout(() => { error.value = '' }, 2500)
+        return
+    }
+    torchEnabled.value = !torchEnabled.value
+}
+
+const playScanFeedback = (ok) => {
+    if (navigator.vibrate) navigator.vibrate(ok ? [80] : [50, 40, 120])
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext
+        if (!AudioCtx) return
+        const ctx = new AudioCtx()
+        const oscillator = ctx.createOscillator()
+        const gain = ctx.createGain()
+        oscillator.type = ok ? 'sine' : 'square'
+        oscillator.frequency.value = ok ? 880 : 220
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01)
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16)
+        oscillator.connect(gain)
+        gain.connect(ctx.destination)
+        oscillator.start()
+        oscillator.stop(ctx.currentTime + 0.18)
+    } catch {}
+}
+
 const onDetect = async (codes) => {
     if (!scanning.value) return
     const token = codes[0]?.rawValue
@@ -73,11 +112,13 @@ const onDetect = async (codes) => {
         const res = await redeemTicket(token, userStore.user?.id || null)
         if (res.ok) {
             lastResult.value = { ...res, type: 'ticket' }
+            playScanFeedback(true)
             if (eventId.value) loadCounts()
             return
         }
         if (res.reason?.includes('déjà') || res.reason?.includes('already')) {
             lastResult.value = { ok: false, reason: res.reason }
+            playScanFeedback(false)
             return
         }
     } catch {}
@@ -91,12 +132,14 @@ const onDetect = async (codes) => {
             const payload = JSON.parse(token)
             if (payload.eid && String(payload.eid) !== String(eventId.value)) {
                 lastResult.value = { ok: false, reason: 'QR appartient à un autre événement' }
+                playScanFeedback(false)
                 return
             }
         } catch {}
     }
 
     lastResult.value = rsvpRes
+    playScanFeedback(!!rsvpRes.ok)
     if (eventId.value && rsvpRes.ok) loadCounts()
 }
 
@@ -146,7 +189,31 @@ const reset = () => {
 
       <!-- Scanner -->
       <div v-if="!lastResult && cameraReady" class="w-full max-w-sm aspect-square bg-gray-900 rounded-2xl overflow-hidden border-2 border-primary/50">
-        <QrcodeStream @detect="onDetect" class="w-full h-full" />
+        <QrcodeStream
+          :torch="torchEnabled"
+          @detect="onDetect"
+          @camera-on="onCameraOn"
+          @error="onCameraError"
+          class="w-full h-full"
+        />
+      </div>
+
+      <div v-if="cameraReady && !lastResult" class="mt-4 grid w-full max-w-sm grid-cols-2 gap-2">
+        <button
+          @click="toggleTorch"
+          class="flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition active:scale-95"
+          :class="torchEnabled ? 'bg-primary text-black' : 'bg-gray-800 text-gray-200'"
+        >
+          <Flashlight class="w-4 h-4" />
+          Lampe
+        </button>
+        <button
+          @click="router.push('/billet/scan')"
+          class="flex items-center justify-center gap-2 rounded-xl bg-gray-800 px-4 py-3 text-sm font-bold text-gray-200 transition active:scale-95"
+        >
+          <Calendar class="w-4 h-4" />
+          Changer
+        </button>
       </div>
 
       <!-- Attente caméra -->
@@ -162,9 +229,14 @@ const reset = () => {
         </div>
         <p class="text-gray-300 font-medium">{{ lastResult.ticket?.buyer_pseudo || lastResult.pseudo }}</p>
         <p class="text-gray-400 text-sm">{{ lastResult.ticket?.buyer_phone || lastResult.phone }}</p>
-        <button @click="reset" class="mt-6 bg-primary text-black font-bold px-6 py-3 rounded-xl flex items-center gap-2 mx-auto">
-          <RotateCcw class="w-4 h-4" /> Scanner suivant
-        </button>
+        <div class="mt-6 grid grid-cols-2 gap-2">
+          <button @click="reset" class="bg-primary text-black font-bold px-4 py-3 rounded-xl flex items-center justify-center gap-2">
+            <RotateCcw class="w-4 h-4" /> Suivant
+          </button>
+          <button @click="router.push('/billet/scan')" class="bg-gray-800 text-white font-bold px-4 py-3 rounded-xl flex items-center justify-center gap-2">
+            <Calendar class="w-4 h-4" /> Changer
+          </button>
+        </div>
       </div>
 
       <!-- Refus -->
@@ -172,12 +244,17 @@ const reset = () => {
         <XCircle class="w-24 h-24 text-red-500 mx-auto mb-4" />
         <h2 class="text-2xl font-bold mb-2">Refusé</h2>
         <p class="text-red-400 text-sm bg-red-900/20 rounded-xl px-4 py-2">{{ lastResult.reason }}</p>
-        <button @click="reset" class="mt-6 bg-gray-800 text-white px-6 py-3 rounded-xl flex items-center gap-2 mx-auto">
-          <RotateCcw class="w-4 h-4" /> Réessayer
-        </button>
+        <div class="mt-6 grid grid-cols-2 gap-2">
+          <button @click="reset" class="bg-gray-800 text-white px-4 py-3 rounded-xl flex items-center justify-center gap-2">
+            <RotateCcw class="w-4 h-4" /> Réessayer
+          </button>
+          <button @click="router.push('/billet/scan')" class="bg-gray-800 text-white px-4 py-3 rounded-xl flex items-center justify-center gap-2">
+            <Calendar class="w-4 h-4" /> Changer
+          </button>
+        </div>
       </div>
 
-      <p v-if="cameraReady && !lastResult" class="text-gray-500 text-sm mt-4">Centrez le QR code dans le cadre</p>
+      <p v-if="cameraReady && !lastResult" class="text-gray-500 text-sm mt-3">Centrez le QR code dans le cadre</p>
     </main>
   </div>
 </template>

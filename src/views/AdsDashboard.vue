@@ -334,7 +334,7 @@ const moveAd = async (index, dir) => {
 
     <div :class="insideAdminLayout ? '' : 'max-w-6xl mx-auto p-4'">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
         <div class="bg-surface border border-gray-800 rounded-xl p-4 text-center">
           <p class="text-2xl font-bold text-yellow-400">{{ ads.length }}</p>
           <p class="text-gray-500 text-xs mt-1">Total pubs</p>
@@ -709,4 +709,3 @@ const moveAd = async (index, dir) => {
     </Teleport>
   </div>
 </template>
-

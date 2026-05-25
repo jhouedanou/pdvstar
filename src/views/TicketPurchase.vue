@@ -5,7 +5,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { createTicket, markTicketPaid, buildQrDataUrl } from '../services/ticketService'
 import { initDeposit, waitForDepositFinal, predictProvider, PAWAPAY_PROVIDERS_CI, isPaymentConfigured } from '../services/paymentService'
-import { ArrowLeft, Ticket, Loader2, CheckCircle2, XCircle, Download, FileText } from 'lucide-vue-next'
+import { ArrowLeft, Ticket, Loader2, CheckCircle2, XCircle, Download, FileText, Bell } from 'lucide-vue-next'
 import { downloadQrAsImage, downloadQrAsPdf } from '../utils/qrDownload'
 
 const route = useRoute()
@@ -26,6 +26,7 @@ const step = ref('form')  // form | paying | success | failed
 const errorMsg = ref('')
 const failureReason = ref('')
 const paymentReady = isPaymentConfigured()
+const interestSaved = ref(false)
 
 onMounted(async () => {
     if (!eventStore.events.length) await eventStore.loadEvents()
@@ -57,6 +58,10 @@ const detect = async () => {
     const p = await predictProvider(phone.value)
     detectedProvider.value = p
     if (p) provider.value = p
+}
+
+const saveInterest = () => {
+    interestSaved.value = true
 }
 
 const buy = async () => {
@@ -142,6 +147,24 @@ const buy = async () => {
           <Ticket class="w-10 h-10 text-primary mx-auto mb-3" />
           <h3 class="font-bold text-lg mb-2">Reservation bientot disponible</h3>
           <p class="text-gray-400 text-sm">La billetterie est preparee, mais le paiement n'est pas encore configure.</p>
+          <div v-if="interestSaved" class="mt-4 rounded-xl bg-green-500/10 p-3 text-sm font-medium text-green-400">
+            C'est noté. Vous pourrez revenir dès que le paiement sera actif.
+          </div>
+          <div class="mt-5 grid grid-cols-2 gap-2">
+            <button
+              @click="saveInterest"
+              class="flex items-center justify-center gap-2 rounded-xl bg-primary px-3 py-3 text-sm font-bold text-black active:scale-95"
+            >
+              <Bell class="h-4 w-4" />
+              Me prévenir
+            </button>
+            <button
+              @click="router.push('/')"
+              class="rounded-xl bg-gray-800 px-3 py-3 text-sm font-bold text-white active:scale-95"
+            >
+              Retour au feed
+            </button>
+          </div>
         </div>
 
         <!-- Form -->

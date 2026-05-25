@@ -272,5 +272,23 @@ const breadcrumb = computed(() => {
   .admin-sidebar {
     display: none;
   }
+
+  .admin-topbar {
+    padding: 0 16px;
+  }
+
+  .admin-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .admin-topbar {
+    padding: 0 12px;
+  }
+
+  .admin-content {
+    padding: 12px;
+  }
 }
 </style>

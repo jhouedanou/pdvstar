@@ -4,7 +4,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useAdminStore } from '../stores/adminStore'
 import { useGeolocation } from '@vueuse/core'
-import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX, Map as MapIcon, SlidersHorizontal, RotateCcw } from 'lucide-vue-next'
+import { Heart, MapPin, Share2, Loader, Search, UserCircle, Home, X, Calendar, Plus, Compass, Sun, Moon, Crown, Edit, Trash2, Check, Store, Volume2, VolumeX, Shield, LogIn, Ticket, Lock, CreditCard, ChevronRight, Sparkles, ScanLine, Flag, SearchX, Map as MapIcon, SlidersHorizontal, RotateCcw, MoreHorizontal } from 'lucide-vue-next'
 import { reportEvent } from '../services/supabase'
 import { useRouter } from 'vue-router'
 import UserProfileModal from '../components/UserProfileModal.vue'
@@ -12,7 +12,6 @@ import OrganizerProfile from '../components/OrganizerProfile.vue'
 import AdBanner from '../components/AdBanner.vue'
 import ConnectionBanner from '../components/ConnectionBanner.vue'
 import { useConnectionStatus } from '../composables/useConnectionStatus'
-import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
 import { sendAttendanceNotification, sendWhatsAppLocation, sendQrImageToPhone } from '../services/greenApiService'
 import { db } from '../services/db'
@@ -95,9 +94,15 @@ const PREFERENCE_CATEGORIES = [
 const showOnboarding = ref(false)
 const _savedPrefs = localStorage.getItem('pdvstar_user_preferences')
 const selectedPreferences = ref(_savedPrefs ? JSON.parse(_savedPrefs) : [])
+const notifyExperienceReady = () => {
+    if (showOnboarding.value || showProfileModal.value) return
+    window.dispatchEvent(new Event('pdvstar:experience-ready'))
+}
 const checkOnboarding = () => {
     if (!localStorage.getItem('pdvstar_onboarding_done')) {
         showOnboarding.value = true
+    } else {
+        notifyExperienceReady()
     }
 }
 const togglePreference = (id) => {
@@ -109,6 +114,7 @@ const saveOnboarding = () => {
     localStorage.setItem('pdvstar_user_preferences', JSON.stringify(selectedPreferences.value))
     localStorage.setItem('pdvstar_onboarding_done', '1')
     showOnboarding.value = false
+    notifyExperienceReady()
 }
 
 const feedDateOptions = [
@@ -179,7 +185,9 @@ onUnmounted(() => { clearInterval(splashTimer) })
 
 const enterApp = () => {
     hasInteracted.value = true
+    localStorage.setItem('pdvstar_splash_entered', '1')
     clearInterval(splashTimer)
+    checkOnboarding()
     setTimeout(() => syncYouTubePlayback(), 500)
 }
 
@@ -446,8 +454,7 @@ const scrollToEvent = async (id) => {
         )
 
         if (eventIndex !== -1 && feedContainer.value) {
-            // Scroll to the event (each slide is 100vh)
-            const slideHeight = window.innerHeight
+            const slideHeight = feedContainer.value.clientHeight
             const targetScroll = eventIndex * slideHeight
 
             feedContainer.value.scrollTo({
@@ -515,12 +522,8 @@ onMounted(async () => {
         console.warn('Ads Supabase fallback local:', e)
     }
 
-    // Show profile modal if user doesn't have a profile
-    if (!userStore.isProfileComplete) {
-        showProfileModal.value = true
-    } else {
-        checkOnboarding()
-    }
+    // Les prompts sont séquencés : splash, onboarding, puis profil seulement sur action.
+    if (hasInteracted.value) checkOnboarding()
 
     // Check Location Recommendations
     if (coords.value.latitude !== Infinity) {
@@ -625,6 +628,7 @@ const toggleMute = () => {
 const handleProfileCreated = () => {
     showProfileModal.value = false
     checkOnboarding()
+    notifyExperienceReady()
 }
 
 // --- Modal States ---
@@ -636,6 +640,24 @@ const selectedMapEvent = ref(null) // Event selected on map
 const selectedOrganizer = ref(null) // For Organizer Profile Modal
 const showGoogleMapsModal = ref(false)
 const googleMapsLocation = ref('')
+const moreActionsEvent = ref(null)
+const expandedEvent = ref(null)
+
+const openMoreActions = (event) => {
+    moreActionsEvent.value = event
+}
+
+const closeMoreActions = () => {
+    moreActionsEvent.value = null
+}
+
+const openEventDetails = (event) => {
+    expandedEvent.value = event
+}
+
+const closeEventDetails = () => {
+    expandedEvent.value = null
+}
 
 // --- Passes d'accès ---
 const showPassShop = ref(false)
@@ -696,10 +718,15 @@ const activeTab = computed({
         showMap.value = false
         showSearch.value = false
         showProfile.value = false
+        moreActionsEvent.value = null
+        expandedEvent.value = null
         
         if (val === 'map') showMap.value = true
         if (val === 'search') showSearch.value = true
-        if (val === 'profile') showProfile.value = true
+        if (val === 'profile') {
+            showProfile.value = true
+            if (!userStore.user) showProfileModal.value = true
+        }
 
         // Pause YouTube quand on quitte le feed
         if (wasFeed && val !== 'feed') {
@@ -717,10 +744,27 @@ const mapContainer = ref(null)
 let mapInstance = null
 let routeLayer = null
 let userMarker = null
+let leafletModule = null
+let leafletCssLoaded = false
 const showRouteInfo = ref(false)
 const routeInfo = ref({ distance: '', duration: '' })
 
-// Inject Leaflet CSS & Listeners
+const loadLeaflet = async () => {
+    if (!leafletCssLoaded) {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+        document.head.appendChild(link)
+        leafletCssLoaded = true
+    }
+    if (!leafletModule) {
+        const mod = await import('leaflet')
+        leafletModule = mod.default || mod
+    }
+    return leafletModule
+}
+
+// Theme & listeners
 onMounted(() => {
     // Theme Init
     if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -730,11 +774,6 @@ onMounted(() => {
         isDarkMode.value = false
         document.documentElement.classList.remove('dark')
     }
-
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-    document.head.appendChild(link)
 
     // Listen for Map Popup Clicks
     document.addEventListener('map-event-click', (e) => {
@@ -749,7 +788,7 @@ onMounted(() => {
 watch(showMap, async (isOpen) => {
     if (isOpen) {
         await nextTick()
-        initMap()
+        await initMap()
         // If an event is selected (e.g. from Itinerary click), fly to it
         if (selectedMapEvent.value && mapInstance) {
             mapInstance.setView([selectedMapEvent.value.coords.lat, selectedMapEvent.value.coords.lng], 16)
@@ -762,8 +801,9 @@ watch(showMap, async (isOpen) => {
     }
 })
 
-const initMap = () => {
+const initMap = async () => {
     if (mapInstance) mapInstance.remove() // Safety cleanup
+    const L = await loadLeaflet()
 
     // Center on Abidjan (Marcory) or Selected Event
     const center = selectedMapEvent.value
@@ -831,6 +871,7 @@ const initMap = () => {
 
 const drawRoute = async (fromLat, fromLng, toLat, toLng) => {
     try {
+        const L = await loadLeaflet()
         // Remove existing route
         if (routeLayer) {
             mapInstance.removeLayer(routeLayer)
@@ -1019,7 +1060,7 @@ const handleSearchSelect = (event) => {
             item.type === 'event' && item.data.id === event.id
         )
         if (eventIndex !== -1 && feedContainer.value) {
-            const slideHeight = window.innerHeight
+            const slideHeight = feedContainer.value.clientHeight
             currentSlideIndex.value = eventIndex
             feedContainer.value.scrollTo({
                 top: eventIndex * slideHeight,
@@ -1464,7 +1505,7 @@ const handleBecomeOrganizer = async () => {
         messageSuccess.value = 'Vous etes maintenant organisateur. Redirection...'
         setTimeout(() => {
             messageSuccess.value = ''
-            router.push('/admin/dashboard')
+            router.push('/pro')
         }, 1500)
     } else {
         organizerError.value = 'Erreur lors de l\'inscription'
@@ -1473,7 +1514,14 @@ const handleBecomeOrganizer = async () => {
 
 const myOrganizerEvents = computed(() => {
     if (!userStore.user || !userStore.isOrganizer) return []
-    return eventStore.events
+    const names = [userStore.user.organizerName, userStore.user.spaceName, userStore.user.name]
+        .filter(Boolean)
+        .map(n => n.toLowerCase())
+    return eventStore.events.filter((event) => {
+        if (event.createdBy && event.createdBy === userStore.user.id) return true
+        const orgName = (event.organizer || event.organizerName || '').toLowerCase()
+        return names.some(name => orgName === name || orgName.includes(name))
+    })
 })
 
 const handleDeleteEvent = async (eventId) => {
@@ -1777,10 +1825,10 @@ const handleDeleteEvent = async (eventId) => {
     </Teleport>
 
     <!-- MAIN FEED VIEW -->
-    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-screen w-full overflow-y-scroll no-scrollbar">
+    <div ref="feedContainer" class="feed-container snap-y snap-mandatory h-[100dvh] w-full overflow-y-scroll no-scrollbar">
       <!-- Aucun résultat pour filtre actif -->
       <div v-if="feedItems.length === 0"
-        class="snap-start h-screen w-full flex flex-col items-center justify-center gap-4 text-center px-8">
+        class="snap-start h-[100dvh] w-full flex flex-col items-center justify-center gap-4 text-center px-8">
         <SearchX class="w-16 h-16 text-gray-700" />
         <p class="text-gray-400 font-bold text-lg">Aucun événement</p>
         <p class="text-gray-600 text-sm">Aucun résultat pour ce filtre.</p>
@@ -1796,7 +1844,7 @@ const handleDeleteEvent = async (eventId) => {
         <AdBanner v-if="item.type === 'ad'" :ad="item.data" />
 
         <!-- EVENT SLIDE -->
-        <div v-else class="event-slide snap-start h-screen w-full relative bg-dark-lighter flex items-end shrink-0">
+        <div v-else class="event-slide snap-start h-[100dvh] w-full relative bg-dark-lighter flex items-end shrink-0">
 
         <!-- Background Image/Video -->
         <div class="absolute inset-0 bg-gray-900">
@@ -1869,8 +1917,8 @@ const handleDeleteEvent = async (eventId) => {
           </div>
         </div>
         
-        <!-- Right Side Actions (Floating properly aligned) -->
-        <div class="action-buttons absolute right-2 bottom-28 flex flex-col gap-6 z-20 items-center">
+        <!-- Right Side Actions (3 actions max on mobile) -->
+        <div class="action-buttons absolute right-2 bottom-28 flex flex-col gap-5 z-20 items-center">
            <!-- Profile/Organizer Avatar (TikTok style) -->
            <div class="relative mb-2 cursor-pointer" @click="openOrganizerProfile(item.data.organizer)">
              <div class="w-12 h-12 rounded-full overflow-hidden p-0.5 transition"
@@ -1901,65 +1949,16 @@ const handleDeleteEvent = async (eventId) => {
               <span class="text-[10px] font-bold">{{ item.data.participantCount }}</span>
             </button>
 
-            <!-- Phase 3 : Bouton Acheter billet si billetterie activée -->
             <button
-              v-if="item.data.ticketingEnabled"
-              @click="handleReservationClick(item.data)"
-              class="action-button flex flex-col items-center gap-1 group">
-              <div class="w-10 h-10 rounded-full bg-primary/90 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition shadow-lg">
-                <Ticket class="w-6 h-6 text-black" />
-              </div>
-              <span class="action-button-text text-[10px] font-bold drop-shadow-md">{{ item.data.ticketPrice || item.data.price || 0 }} CFA</span>
-            </button>
-
-            <button @click="openMap(item.data.location, item.data)" class="action-button flex flex-col items-center gap-1 group">
+              @click="openMoreActions(item.data)"
+              class="action-button flex flex-col items-center gap-1 group"
+              aria-label="Plus d'actions"
+            >
               <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
-                 <MapPin class="w-6 h-6 text-white"/>
+                <MoreHorizontal class="w-6 h-6 text-white" />
               </div>
-              <span class="action-button-text text-xs font-semibold drop-shadow-md">Map</span>
+              <span class="action-button-text text-xs font-semibold drop-shadow-md">Plus</span>
             </button>
-
-           <button @click="handleShare(item.data)" class="action-button flex flex-col items-center gap-1 group">
-             <div class="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition">
-                <Share2 class="w-6 h-6 text-white"/>
-             </div>
-             <span class="action-button-text text-xs font-semibold drop-shadow-md">Partager</span>
-           </button>
-
-           <button
-             @click="openReport(item.data)"
-             class="action-button mt-1 flex flex-col items-center gap-1 opacity-55 transition hover:opacity-100 active:scale-95"
-             aria-label="Signaler cet evenement"
-             title="Signaler"
-           >
-             <div class="w-8 h-8 rounded-full bg-black/25 border border-white/10 backdrop-blur-sm flex items-center justify-center">
-               <Flag class="w-4 h-4 text-white/65"/>
-             </div>
-             <span class="sr-only">Signaler</span>
-           </button>
-
-           <!-- Mute / Unmute Button -->
-           <button
-             v-if="hasEventAudio(item.data)"
-             @click="toggleMute"
-             class="action-button flex flex-col items-center gap-1 group"
-           >
-             <div class="w-10 h-10 rounded-full backdrop-blur-sm flex items-center justify-center group-active:scale-90 transition"
-                  :class="isMuted ? 'bg-red-500/30' : 'bg-primary/30'">
-               <VolumeX v-if="isMuted" class="w-6 h-6 text-red-400" />
-               <Volume2 v-else class="w-6 h-6 text-primary" />
-             </div>
-             <span class="action-button-text text-xs font-semibold drop-shadow-md">{{ isMuted ? 'Muet' : 'Son' }}</span>
-           </button>
-
-           <!-- Spinning Disc (TikTok Vibe) -->
-           <div class="mt-4 relative">
-              <div class="w-12 h-12 rounded-full bg-black border-[3px] border-dark-lighter flex items-center justify-center overflow-hidden"
-                   :class="(itemIndex === currentSlideIndex && !isMuted && hasEventAudio(item.data)) ? 'animate-spin-slow' : ''">
-                 <img :src="getEventVisualUrl(item.data)" class="w-full h-full object-cover opacity-80" />
-              </div>
-              <!-- Floating Notes Animation would go here -->
-           </div>
         </div>
 
         <!-- Content Overlay (Bottom Left) -->
@@ -1976,7 +1975,7 @@ const handleDeleteEvent = async (eventId) => {
             <span>{{ item.data.price?.toLocaleString() }} CFA</span>
           </div>
 
-          <div class="max-w-[85%]">
+          <div class="w-full">
             <h2 class="text-2xl font-bold leading-tight mb-1 text-white text-shadow">{{ item.data.title }}</h2>
             <!-- Date de l'événement -->
             <div v-if="item.data.date" class="flex items-center gap-1.5 mb-1 flex-wrap">
@@ -1996,12 +1995,28 @@ const handleDeleteEvent = async (eventId) => {
           </div>
 
           <!-- Collapsed Description (TikTok style) -->
-          <p class="text-gray-200 text-sm line-clamp-2 w-[85%] leading-relaxed opacity-90 mb-2">
+          <p class="text-gray-200 text-sm line-clamp-2 w-full leading-relaxed opacity-90 mb-1">
             {{ item.data.description || 'Découvrez cet événement incontournable!' }}
           </p>
+          <div class="flex flex-wrap items-center gap-2 pointer-events-auto">
+            <button
+              @click="openEventDetails(item.data)"
+              class="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white backdrop-blur-sm active:scale-95"
+            >
+              Voir plus
+            </button>
+            <button
+              v-if="item.data.ticketingEnabled"
+              @click="handleReservationClick(item.data)"
+              class="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-black text-black shadow-lg shadow-black/25 active:scale-95"
+            >
+              <Ticket class="w-3.5 h-3.5" />
+              {{ item.data.ticketPrice || item.data.price || 0 }} CFA
+            </button>
+          </div>
 
           <!-- Features Tags -->
-          <div v-if="item.data.features?.length" class="flex flex-wrap gap-1.5 w-[85%]">
+          <div v-if="item.data.features?.length" class="flex flex-wrap gap-1.5 w-full">
             <span v-for="feature in item.data.features" :key="feature" class="bg-white/20 backdrop-blur-sm text-white text-xs px-2 py-1 rounded-full font-medium">
                 {{ feature }}
             </span>
@@ -2507,7 +2522,7 @@ const handleDeleteEvent = async (eventId) => {
                          <h3 class="font-bold text-lg flex items-center gap-2"><Store class="w-5 h-5" /> {{ userStore.user?.spaceName || 'Mon Espace' }}</h3>
                          <p class="text-xs opacity-80">Organisateur — {{ myOrganizerEvents.length }} événement(s)</p>
                        </div>
-                       <button @click="router.push('/admin/dashboard')" class="bg-black/20 hover:bg-black/30 text-black px-3 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5">
+                       <button @click="router.push('/pro/create')" class="bg-black/20 hover:bg-black/30 text-black px-3 py-2 rounded-xl text-sm font-bold transition flex items-center gap-1.5">
                          <Plus class="w-4 h-4" /> Créer
                        </button>
                      </div>
@@ -2528,7 +2543,7 @@ const handleDeleteEvent = async (eventId) => {
                          </div>
                        </div>
                        <div class="flex flex-col gap-1 flex-shrink-0">
-                         <button @click="router.push('/admin/dashboard')" class="p-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                         <button @click="router.push(`/organizer/events/${event.id}`)" class="p-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">
                            <Edit class="w-3.5 h-3.5 text-gray-600 dark:text-gray-400" />
                          </button>
                          <button v-if="deleteConfirmId !== event.id" @click="deleteConfirmId = event.id" class="p-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition">
@@ -2545,7 +2560,7 @@ const handleDeleteEvent = async (eventId) => {
                        </div>
                      </div>
                      <!-- Voir tout -->
-                     <button v-if="myOrganizerEvents.length > 5" @click="router.push('/admin/dashboard')" class="w-full text-center text-sm text-primary font-medium py-2 hover:underline">
+                     <button v-if="myOrganizerEvents.length > 5" @click="router.push('/pro')" class="w-full text-center text-sm text-primary font-medium py-2 hover:underline">
                        Voir tous les événements ({{ myOrganizerEvents.length }})
                      </button>
                    </div>
@@ -2553,7 +2568,7 @@ const handleDeleteEvent = async (eventId) => {
                    <!-- Aucun événement -->
                    <div v-else class="text-center py-8 bg-white dark:bg-gray-900 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
                      <p class="text-gray-500 mb-3">Aucun événement créé pour le moment</p>
-                     <button @click="router.push('/admin/dashboard')" class="bg-primary text-black font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2 hover:bg-primary/90 transition text-sm">
+                     <button @click="router.push('/pro/create')" class="bg-primary text-black font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2 hover:bg-primary/90 transition text-sm">
                        <Plus class="w-4 h-4" /> Créer mon premier événement
                      </button>
                    </div>
@@ -2695,6 +2710,153 @@ const handleDeleteEvent = async (eventId) => {
         </button>
 
     </div>
+
+    <!-- Menu More : actions secondaires du feed -->
+    <Teleport to="body">
+      <transition name="up">
+        <div
+          v-if="moreActionsEvent"
+          class="fixed inset-0 z-[75] flex items-end bg-black/70 backdrop-blur-sm"
+          @click.self="closeMoreActions"
+        >
+          <div class="w-full rounded-t-3xl border-t border-white/10 bg-gray-950 px-5 pb-6 pt-4 text-white shadow-2xl">
+            <div class="mx-auto mb-4 h-1 w-10 rounded-full bg-gray-700" />
+            <div class="mb-4 flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-black">{{ moreActionsEvent.title }}</p>
+                <p class="truncate text-xs text-gray-500">{{ moreActionsEvent.location }}</p>
+              </div>
+              <button @click="closeMoreActions" class="rounded-full bg-white/10 p-2 text-gray-300">
+                <X class="h-4 w-4" />
+              </button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <button
+                @click="openMap(moreActionsEvent.location, moreActionsEvent); closeMoreActions()"
+                class="flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold active:scale-95"
+              >
+                <MapPin class="h-4 w-4 text-primary" /> Carte
+              </button>
+              <button
+                @click="handleShare(moreActionsEvent); closeMoreActions()"
+                class="flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold active:scale-95"
+              >
+                <Share2 class="h-4 w-4 text-primary" /> Partager
+              </button>
+              <button
+                v-if="hasEventAudio(moreActionsEvent)"
+                @click="toggleMute(); closeMoreActions()"
+                class="flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold active:scale-95"
+              >
+                <VolumeX v-if="!isMuted" class="h-4 w-4 text-primary" />
+                <Volume2 v-else class="h-4 w-4 text-primary" />
+                {{ isMuted ? 'Activer le son' : 'Couper le son' }}
+              </button>
+              <button
+                @click="openReport(moreActionsEvent); closeMoreActions()"
+                class="flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold text-orange-300 active:scale-95"
+              >
+                <Flag class="h-4 w-4" /> Signaler
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+
+    <!-- Fiche événement complète -->
+    <Teleport to="body">
+      <transition name="up">
+        <div
+          v-if="expandedEvent"
+          class="fixed inset-0 z-[76] flex items-end bg-black/75 backdrop-blur-sm"
+          @click.self="closeEventDetails"
+        >
+          <div class="max-h-[88dvh] w-full overflow-y-auto rounded-t-3xl border-t border-white/10 bg-gray-950 text-white shadow-2xl">
+            <div class="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-gray-950/95 px-5 py-4 backdrop-blur">
+              <div class="min-w-0">
+                <p class="truncate text-base font-black">{{ expandedEvent.title }}</p>
+                <p class="truncate text-xs text-gray-500">{{ expandedEvent.organizer || expandedEvent.organizerName }}</p>
+              </div>
+              <button @click="closeEventDetails" class="rounded-full bg-white/10 p-2 text-gray-300">
+                <X class="h-5 w-5" />
+              </button>
+            </div>
+
+            <img
+              v-if="getEventVisualUrl(expandedEvent)"
+              :src="getEventVisualUrl(expandedEvent)"
+              :alt="expandedEvent.title"
+              class="h-52 w-full object-cover"
+            />
+
+            <div class="space-y-4 px-5 pb-8 pt-5">
+              <div class="space-y-2 text-sm">
+                <p v-if="expandedEvent.date" class="flex items-center gap-2 text-primary">
+                  <Calendar class="h-4 w-4" />
+                  <span class="font-semibold">
+                    {{ getDateDisplayText(expandedEvent.date) }}
+                    à {{ new Date(expandedEvent.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) }}
+                  </span>
+                </p>
+                <p class="flex items-center gap-2 text-gray-300">
+                  <MapPin class="h-4 w-4 text-primary" />
+                  <span>{{ expandedEvent.location }}</span>
+                </p>
+              </div>
+
+              <p class="text-sm leading-relaxed text-gray-200">
+                {{ expandedEvent.description || 'Découvrez cet événement incontournable.' }}
+              </p>
+
+              <div v-if="expandedEvent.features?.length" class="flex flex-wrap gap-2">
+                <span
+                  v-for="feature in expandedEvent.features"
+                  :key="feature"
+                  class="rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-gray-200"
+                >
+                  {{ feature }}
+                </span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  @click="handleJyVais(expandedEvent); closeEventDetails()"
+                  class="flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-black text-black active:scale-95"
+                >
+                  <Heart class="h-4 w-4" />
+                  {{ expandedEvent.isRegistered ? 'Inscrit' : "J'y vais" }}
+                </button>
+                <button
+                  v-if="expandedEvent.ticketingEnabled"
+                  @click="handleReservationClick(expandedEvent)"
+                  class="flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black active:scale-95"
+                >
+                  <Ticket class="h-4 w-4" />
+                  Billet
+                </button>
+                <button
+                  @click="openMap(expandedEvent.location, expandedEvent); closeEventDetails()"
+                  class="flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold active:scale-95"
+                  :class="expandedEvent.ticketingEnabled ? '' : 'col-span-1'"
+                >
+                  <MapPin class="h-4 w-4 text-primary" />
+                  Carte
+                </button>
+                <button
+                  @click="handleShare(expandedEvent)"
+                  class="flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold active:scale-95"
+                >
+                  <Share2 class="h-4 w-4 text-primary" />
+                  Partager
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
 
     <!-- BOUTIQUE DE PASSES -->
     <Teleport to="body">
@@ -3037,6 +3199,13 @@ const handleDeleteEvent = async (eventId) => {
   max-width: 600px;
   margin: 0 auto;
   padding-inline: 0.75rem;
+}
+
+.bottom-nav {
+  left: 50% !important;
+  right: auto !important;
+  width: min(100vw, 640px);
+  transform: translateX(-50%);
 }
 
 /* Toast animations */

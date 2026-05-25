@@ -514,7 +514,7 @@ const formatDate = (dateStr) => {
         </div>
 
         <!-- Bandeau Quota -->
-        <div class="mb-6 rounded-xl p-4 border flex items-center justify-between gap-3"
+        <div class="mb-6 rounded-xl p-4 border flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center"
           :class="hasReachedQuota ? 'bg-red-900/20 border-red-800' : 'bg-surface border-gray-800'">
           <div class="flex items-center gap-3">
             <Ticket class="w-5 h-5" :class="hasReachedQuota ? 'text-red-400' : 'text-primary'" />
@@ -535,26 +535,26 @@ const formatDate = (dateStr) => {
               </p>
             </div>
           </div>
-          <router-link v-if="!userStore.hasActivePass" to="/" class="bg-primary text-black text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-primary/90 transition whitespace-nowrap">
+          <router-link v-if="!userStore.hasActivePass" to="/" class="bg-primary text-black text-xs font-bold px-3 py-2 rounded-lg hover:bg-primary/90 transition text-center whitespace-nowrap">
             Obtenir un Pass
           </router-link>
         </div>
 
         <!-- Boutons d'action -->
-        <div class="flex gap-3 mb-6">
+        <div class="grid grid-cols-2 gap-3 mb-6 sm:flex">
           <button
             @click="handleCreateEvent"
             :disabled="hasReachedQuota"
-            class="flex-1 bg-primary text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            class="col-span-2 sm:col-span-1 sm:flex-1 bg-primary text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus class="w-5 h-5" />
             Nouvel Événement
           </button>
-          <router-link to="/organizer/ads" class="bg-yellow-400 text-black font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-yellow-500 transition">
+          <router-link to="/organizer/ads" class="bg-yellow-400 text-black font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-500 transition">
             <Megaphone class="w-5 h-5" />
             Publicités
           </router-link>
-          <button @click="router.push('/billet/scan')" class="bg-purple-500 text-white font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-purple-600 transition">
+          <button @click="router.push('/billet/scan')" class="bg-purple-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-600 transition">
             <ScanLine class="w-5 h-5" />
             Scan
           </button>
@@ -791,12 +791,12 @@ const formatDate = (dateStr) => {
               </div>
 
               <!-- Stats globales -->
-              <div class="grid grid-cols-4 divide-x divide-gray-800 border-b border-gray-800">
-                <div class="text-center py-3 px-2">
+              <div class="grid grid-cols-2 sm:grid-cols-4 sm:divide-x divide-gray-800 border-b border-gray-800">
+                <div class="text-center py-3 px-2 border-b border-gray-800 sm:border-b-0">
                   <p class="text-lg font-bold text-white">{{ item.rsvps.length }}</p>
                   <p class="text-[10px] text-gray-500">RSVP</p>
                 </div>
-                <div class="text-center py-3 px-2">
+                <div class="text-center py-3 px-2 border-b border-gray-800 sm:border-b-0">
                   <p class="text-lg font-bold text-green-400">{{ getTicketStats(item.tickets).valid }}</p>
                   <p class="text-[10px] text-gray-500">Billets valides</p>
                 </div>

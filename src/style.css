@@ -166,7 +166,7 @@ input {
 
   /* Ajuster les proportions */
   .event-slide {
-    height: 100vh;
+    height: 100dvh;
     display: flex;
     justify-content: center;
     align-items: center;

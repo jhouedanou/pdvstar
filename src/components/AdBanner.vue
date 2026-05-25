@@ -55,7 +55,7 @@ const shareAd = async () => {
 </script>
 
 <template>
-  <div class="event-slide snap-start h-screen w-full relative bg-dark-lighter flex items-end cursor-pointer overflow-hidden group shrink-0" @click="handleAdClick">
+  <div class="event-slide snap-start h-[100dvh] w-full relative bg-dark-lighter flex items-end cursor-pointer overflow-hidden group shrink-0" @click="handleAdClick">
 
     <!-- Background Image -->
     <div class="absolute inset-0 bg-gray-900">

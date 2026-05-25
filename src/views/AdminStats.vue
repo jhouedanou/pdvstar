@@ -129,7 +129,8 @@ const statusBadge = (e) => {
       </div>
       <div class="max-h-80 overflow-y-auto">
         <div v-if="!drillEvents.length" class="text-center text-slate-500 py-8 text-sm">Aucun résultat</div>
-        <table v-else class="w-full text-sm">
+        <div v-else class="overflow-x-auto">
+        <table class="min-w-[520px] w-full text-sm">
           <tbody>
             <tr v-for="e in drillEvents" :key="e.id"
               class="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer transition"
@@ -152,6 +153,7 @@ const statusBadge = (e) => {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
     </div>
 

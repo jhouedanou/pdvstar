@@ -4,6 +4,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const show = ref(false)
 const deferredPrompt = ref(null)
 const installing = ref(false)
+let readyPoll = null
 
 const DISMISS_KEY = 'pwa_install_dismissed_at'
 const DISMISS_DAYS = 7
@@ -19,11 +20,30 @@ function isStandalone() {
     || window.navigator.standalone === true
 }
 
+function isExperienceReady() {
+  return localStorage.getItem('pdvstar_splash_entered') === '1'
+    && localStorage.getItem('pdvstar_onboarding_done') === '1'
+    && !document.querySelector('[data-pdv-modal]')
+}
+
+function scheduleShow() {
+  if (!deferredPrompt.value || isDismissed() || isStandalone()) return
+  if (!isExperienceReady()) return
+  window.clearInterval(readyPoll)
+  readyPoll = null
+  setTimeout(() => {
+    if (deferredPrompt.value && !isDismissed() && !isStandalone() && isExperienceReady()) {
+      show.value = true
+    }
+  }, 8000)
+}
+
 function onBeforeInstall(e) {
   e.preventDefault()
   deferredPrompt.value = e
-  if (!isDismissed() && !isStandalone()) {
-    setTimeout(() => { show.value = true }, 2000)
+  scheduleShow()
+  if (!readyPoll) {
+    readyPoll = window.setInterval(scheduleShow, 3000)
   }
 }
 
@@ -45,8 +65,15 @@ function dismiss() {
   show.value = false
 }
 
-onMounted(() => window.addEventListener('beforeinstallprompt', onBeforeInstall))
-onUnmounted(() => window.removeEventListener('beforeinstallprompt', onBeforeInstall))
+onMounted(() => {
+  window.addEventListener('beforeinstallprompt', onBeforeInstall)
+  window.addEventListener('pdvstar:experience-ready', scheduleShow)
+})
+onUnmounted(() => {
+  window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+  window.removeEventListener('pdvstar:experience-ready', scheduleShow)
+  window.clearInterval(readyPoll)
+})
 </script>
 
 <template>

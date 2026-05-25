@@ -70,7 +70,7 @@ onMounted(load)
     </div>
 
     <!-- Stat tabs -->
-    <div class="grid grid-cols-4 gap-2 mb-6">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
       <button @click="statusFilter = 'pending'" class="text-left bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 rounded-xl p-3 transition"
         :class="statusFilter === 'pending' ? 'ring-1 ring-orange-500' : ''">
         <p class="text-2xl font-bold text-orange-400">{{ counts.pending }}</p>
@@ -108,14 +108,14 @@ onMounted(load)
     </div>
     <div v-else class="space-y-2">
       <div v-for="r in filtered" :key="r.id"
-        class="bg-slate-800/40 border rounded-xl px-4 py-3 flex items-start gap-3"
+        class="bg-slate-800/40 border rounded-xl px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-start"
         :class="r.status === 'pending' ? 'border-orange-500/30' : 'border-slate-700/40 opacity-75'">
 
         <img v-if="r.events?.image" :src="r.events.image" class="w-14 h-14 rounded-lg object-cover flex-shrink-0" />
         <div v-else class="w-14 h-14 rounded-lg bg-slate-700 flex-shrink-0" />
 
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex flex-wrap items-center gap-2 mb-1">
             <p class="text-sm font-medium text-white truncate">{{ r.events?.title || 'Event supprimé' }}</p>
             <span class="text-[9px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider"
               :class="{
@@ -131,7 +131,7 @@ onMounted(load)
           </p>
         </div>
 
-        <div class="flex flex-col gap-1.5 flex-shrink-0">
+        <div class="grid grid-cols-3 gap-1.5 sm:flex sm:flex-col sm:flex-shrink-0">
           <button v-if="r.events" @click="goToEvent(r.event_id)"
             class="text-[10px] px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg transition flex items-center gap-1">
             <ExternalLink class="w-3 h-3" /> Event

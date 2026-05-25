@@ -5,25 +5,25 @@ import './style.css'
 import App from './App.vue'
 import { checkAdminSession } from './stores/adminStore'
 
-// Basic Routes Placeholder
-import ProDashboard from './views/ProDashboard.vue'
-import FeedUser from './views/FeedUser.vue'
-import CreateEventWizard from './components/CreateEventWizard.vue'
-import AdminLogin from './views/AdminLogin.vue'
-import AdminDashboard from './views/AdminDashboard.vue'
-import AdsDashboard from './views/AdsDashboard.vue'
-import LegalPages from './views/LegalPages.vue'
-import TicketPurchase from './views/TicketPurchase.vue'
-import TicketScan from './views/TicketScan.vue'
-import ProfilePage from './views/ProfilePage.vue'
-import OrganizerEventDetail from './views/OrganizerEventDetail.vue'
-import AdminEventDetail from './views/AdminEventDetail.vue'
-import AdminStats from './views/AdminStats.vue'
-import AdminSplash from './views/AdminSplash.vue'
-import AdminMedia from './views/AdminMedia.vue'
-import AdminSettings from './views/AdminSettings.vue'
-import AdminUsers from './views/AdminUsers.vue'
-import AdminReports from './views/AdminReports.vue'
+const FeedUser = () => import('./views/FeedUser.vue')
+const ProfilePage = () => import('./views/ProfilePage.vue')
+const ProDashboard = () => import('./views/ProDashboard.vue')
+const CreateEventWizard = () => import('./components/CreateEventWizard.vue')
+const OrganizerEventDetail = () => import('./views/OrganizerEventDetail.vue')
+const AdminLogin = () => import('./views/AdminLogin.vue')
+const AdminDashboard = () => import('./views/AdminDashboard.vue')
+const AdminEventDetail = () => import('./views/AdminEventDetail.vue')
+const AdminStats = () => import('./views/AdminStats.vue')
+const AdminSplash = () => import('./views/AdminSplash.vue')
+const AdminMedia = () => import('./views/AdminMedia.vue')
+const AdminSettings = () => import('./views/AdminSettings.vue')
+const AdminUsers = () => import('./views/AdminUsers.vue')
+const AdminReports = () => import('./views/AdminReports.vue')
+const AdminNotifications = () => import('./views/AdminNotifications.vue')
+const AdsDashboard = () => import('./views/AdsDashboard.vue')
+const LegalPages = () => import('./views/LegalPages.vue')
+const TicketPurchase = () => import('./views/TicketPurchase.vue')
+const TicketScan = () => import('./views/TicketScan.vue')
 
 const routes = [
     { path: '/', component: FeedUser }, // Default to User Feed
@@ -45,7 +45,7 @@ const routes = [
     { path: '/admin/settings', component: AdminSettings, meta: { requiresAdmin: true } },
     { path: '/admin/users', component: AdminUsers, meta: { requiresAdmin: true } },
     { path: '/admin/reports', component: AdminReports, meta: { requiresAdmin: true } },
-    { path: '/admin/notifications', component: () => import('./views/AdminNotifications.vue'), meta: { requiresAdmin: true } },
+    { path: '/admin/notifications', component: AdminNotifications, meta: { requiresAdmin: true } },
     { path: '/billet/:id', component: TicketPurchase },
     { path: '/billet/scan/:eventId?', component: TicketScan, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/legal', component: LegalPages },
