@@ -7,6 +7,8 @@ import { useUserStore } from '../stores/userStore'
 import { processImage, processAndUpload } from '../utils/imageUpload'
 import { useDictation } from '../composables/useDictation'
 import { ArrowLeft, ArrowRight, Calendar, Camera, Check, FileText, Loader2, MapPin, Mic, MicOff, Music, Plus, Tag, Ticket, Type, X } from 'lucide-vue-next'
+import { sendWhatsAppMessage } from '../services/greenApiService'
+import { EVENT_CATEGORIES } from '../constants/categories'
 
 const router = useRouter()
 const store = useEventStore()
@@ -328,6 +330,26 @@ const publishEvent = async () => {
     })
 
     isSubmitting.value = false
+
+    // Notifier l'admin si événement en attente de validation
+    if (status === 'pending') {
+        const adminPhone = import.meta.env.VITE_ADMIN_PHONE || '+2250748348221'
+        const organizer = form.value.organizer || organizerName.value || userStore.user?.name || 'Organisateur inconnu'
+        const orgPhone = form.value.organizerPhone || userStore.user?.phone || 'N/A'
+        const eventTitle = form.value.title || 'Evenement sans titre'
+        const eventDate = form.value.date ? new Date(form.value.date).toLocaleString('fr-FR') : 'Non renseignee'
+        const message = `Nouvel evenement a valider
+
+Titre : ${eventTitle}
+Organisateur : ${organizer}
+Telephone : ${orgPhone}
+Date : ${eventDate}
+Lieu : ${form.value.location || 'Non renseigne'}
+
+Connectez-vous sur /admin/dashboard pour moderer.`
+        sendWhatsAppMessage(adminPhone, message).catch(() => {})
+    }
+
     router.push('/organizer')
 }
 
@@ -525,20 +547,25 @@ onUnmounted(() => {
           <h2 class="text-2xl font-bold mb-2">Details admin</h2>
           <p class="text-gray-400 text-sm">Description, tags, premium, reservation et musique de fond.</p>
         </div>
-        <!-- Catégorie -->
-        <div class="space-y-1">
-          <label class="text-xs text-gray-400 font-medium">Catégorie</label>
-          <select v-model="form.category" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 outline-none focus:border-primary text-white">
-            <option value="">Choisir une catégorie...</option>
-            <option value="musique">🎵 Musique</option>
-            <option value="dj">🎧 DJ / Club</option>
-            <option value="brunch">🥂 Brunch</option>
-            <option value="sport">⚽ Sport</option>
-            <option value="art">🎨 Art &amp; Culture</option>
-            <option value="comedie">😂 Comédie</option>
-            <option value="afterwork">🍹 Afterwork</option>
-            <option value="festival">🂪 Festival</option>
-          </select>
+        <!-- Catégorie (boutons pills, plus visibles que select) -->
+        <div class="space-y-2">
+          <label class="text-xs text-gray-400 font-medium flex items-center gap-1">
+            <Tag class="w-3.5 h-3.5" />
+            Catégorie de l'événement
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="cat in EVENT_CATEGORIES"
+              :key="cat.v"
+              type="button"
+              @click="form.category = form.category === cat.v ? '' : cat.v"
+              class="px-3 py-2 rounded-full text-xs font-bold transition border"
+              :class="form.category === cat.v ? 'bg-primary/20 text-primary border-primary/50' : 'bg-gray-900 text-gray-400 border-gray-700 hover:border-gray-500'"
+            >
+              {{ cat.emoji }} {{ cat.l }}
+            </button>
+          </div>
+          <p v-if="!form.category" class="text-[10px] text-gray-500">Aide la recommandation. Sinon déduit automatiquement du titre.</p>
         </div>
         <div>
           <div class="flex items-center justify-between mb-2">

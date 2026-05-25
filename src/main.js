@@ -46,7 +46,7 @@ const routes = [
     { path: '/admin/users', component: AdminUsers, meta: { requiresAdmin: true } },
     { path: '/admin/reports', component: AdminReports, meta: { requiresAdmin: true } },
     { path: '/billet/:id', component: TicketPurchase },
-    { path: '/billet/scan', component: TicketScan, meta: { requiresRole: ['organizer', 'admin'] } },
+    { path: '/billet/scan/:eventId?', component: TicketScan, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/legal', component: LegalPages },
 ]
 

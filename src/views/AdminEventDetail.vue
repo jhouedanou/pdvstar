@@ -6,6 +6,7 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { approveEvent as approveModeration, rejectEvent as rejectModeration } from '../services/moderationService'
 import { listRsvpsForEvent } from '../services/rsvpService'
+import { sendWhatsAppMessage } from '../services/greenApiService'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +23,17 @@ const load = async () => {
     if (event.value) attendees.value = await listRsvpsForEvent(event.value.id)
 }
 
+const notifyOrganizer = (ev, approved, reason = '') => {
+    const phone = ev.organizerPhone || ev.organizer_phone
+    if (!phone) return
+    const title = ev.title || 'Votre événement'
+    const date = ev.date ? new Date(ev.date).toLocaleString('fr-FR') : ''
+    const msg = approved
+        ? `Babi Vibes — Événement approuvé !\n\n"${title}" (${date}) est maintenant visible sur l'application.\n\nMerci et bonne chance !`
+        : `Babi Vibes — Événement refusé\n\n"${title}" n'a pas été approuvé.\n\nRaison : ${reason || 'Non conforme aux critères'}\n\nCorrigez et soumettez à nouveau.`
+    sendWhatsAppMessage(phone, msg).catch(() => {})
+}
+
 const approve = async () => {
     if (!event.value || isBusy.value) return
     isBusy.value = true
@@ -32,17 +44,20 @@ const approve = async () => {
         approvedAt: new Date().toISOString()
     })
     await approveModeration(event.value.id, userStore.user?.id || null).catch(() => {})
+    notifyOrganizer(event.value, true)
     isBusy.value = false
 }
 
 const reject = async () => {
     if (!event.value || !rejectionReason.value.trim() || isBusy.value) return
     isBusy.value = true
+    const reason = rejectionReason.value.trim()
     await eventStore.updateEvent(event.value.id, {
         status: 'rejected',
-        rejectionReason: rejectionReason.value.trim()
+        rejectionReason: reason
     })
-    await rejectModeration(event.value.id, rejectionReason.value.trim(), userStore.user?.id || null).catch(() => {})
+    await rejectModeration(event.value.id, reason, userStore.user?.id || null).catch(() => {})
+    notifyOrganizer(event.value, false, reason)
     isBusy.value = false
 }
 

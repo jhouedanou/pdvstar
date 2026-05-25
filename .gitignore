@@ -28,3 +28,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+supabase/migrations/002_seed_pro_admin_accounts.sql

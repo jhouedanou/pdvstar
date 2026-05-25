@@ -18,6 +18,7 @@ import {
 import { PASS_CATALOG, fetchUsers, updateUser, deleteUser, fetchReports, updateReportStatus } from '../services/supabase'
 import Combobox from '../components/Combobox.vue'
 import { approveEvent as modApprove, rejectEvent as modReject } from '../services/moderationService'
+import { sendWhatsAppMessage } from '../services/greenApiService'
 import L from 'leaflet'
 
 const router = useRouter()
@@ -416,6 +417,17 @@ const adminSummary = computed(() => {
     }
 })
 
+const notifyOrganizer = (ev, approved, reason = '') => {
+    const phone = ev.organizerPhone || ev.organizer_phone
+    if (!phone) return
+    const title = ev.title || 'Votre événement'
+    const date = ev.date ? new Date(ev.date).toLocaleString('fr-FR') : ''
+    const msg = approved
+        ? `Babi Vibes — Événement approuvé !\n\n"${title}" (${date}) est maintenant visible sur l'application.`
+        : `Babi Vibes — Événement refusé\n\n"${title}" n'a pas été approuvé.\n\nRaison : ${reason || 'Non conforme aux critères'}`
+    sendWhatsAppMessage(phone, msg).catch(() => {})
+}
+
 // Approuver un événement
 const approveEvent = async (event) => {
     await eventStore.updateEvent(event.id, {
@@ -425,6 +437,7 @@ const approveEvent = async (event) => {
         approvedAt: new Date().toISOString()
     })
     modApprove(event.id, userStore.user?.id || null).catch(() => {})
+    notifyOrganizer(event, true)
 }
 
 // Ouvrir la modale de rejet
@@ -443,6 +456,7 @@ const confirmReject = async () => {
             rejectionReason: reason
         })
         modReject(rejectingEvent.value.id, reason, userStore.user?.id || null).catch(() => {})
+        notifyOrganizer(rejectingEvent.value, false, reason)
     }
     showRejectModal.value = false
     rejectingEvent.value = null

@@ -253,8 +253,10 @@ export const useUserStore = defineStore('user', () => {
         if (!user.value) return false
         isLoading.value = true
         try {
+            // Preserve admin role : ne pas downgrade
+            const newRole = user.value.role === 'admin' ? 'admin' : 'organizer'
             await updateProfile({
-                role: 'organizer',
+                role: newRole,
                 spaceName: organizerData.spaceName,
                 organizerName: organizerData.organizerName || user.value.name
             })
@@ -303,6 +305,7 @@ export const useUserStore = defineStore('user', () => {
         updateProfile,
         toggleFollow,
         becomeOrganizer,
+        saveSession,
         logout
     }
 })

@@ -14,12 +14,13 @@ import ConnectionBanner from '../components/ConnectionBanner.vue'
 import { useConnectionStatus } from '../composables/useConnectionStatus'
 import L from 'leaflet'
 // import RotateDeviceMessage from '../components/RotateDeviceMessage.vue' // Décommenter pour activer le message de rotation
-import { sendAttendanceNotification, sendWhatsAppLocation } from '../services/greenApiService'
+import { sendAttendanceNotification, sendWhatsAppLocation, sendQrImageToPhone } from '../services/greenApiService'
 import { db } from '../services/db'
 import { fetchActiveAds } from '../services/supabase'
 import { createRsvp, markRsvpNotified, genRsvpQrPayload } from '../services/rsvpService'
 import { buildQrDataUrl } from '../services/ticketService'
 import { trackEventInteraction } from '../services/interactionService'
+import { EVENT_CATEGORIES, matchesCategory, deriveCategoryFromText } from '../constants/categories'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -98,17 +99,7 @@ const feedPriceOptions = [
     { v: 'paid', l: 'Payant' }
 ]
 
-const FEED_CATEGORIES = [
-    { v: 'soiree', l: '🌙 Soirée' },
-    { v: 'musique', l: '🎵 Musique' },
-    { v: 'dj', l: '🎧 DJ' },
-    { v: 'festival', l: '🎪 Festival' },
-    { v: 'brunch', l: '🥂 Brunch' },
-    { v: 'afterwork', l: '🍹 Afterwork' },
-    { v: 'sport', l: '⚽ Sport' },
-    { v: 'art', l: '🎨 Art' },
-    { v: 'comedie', l: '😂 Comédie' },
-]
+const FEED_CATEGORIES = EVENT_CATEGORIES.map(c => ({ v: c.v, l: `${c.emoji} ${c.l}` }))
 const feedCategoryFilter = ref('all')
 
 // Drawer de filtres
@@ -194,12 +185,16 @@ const computeRelevanceScore = (event) => {
     const eventDate = new Date(event.date)
     const hoursUntil = (eventDate - now) / (1000 * 60 * 60)
 
-    // 1. Proximité temporelle (événements proches = score plus élevé)
+    // 1. Proximité temporelle - moins pénalisant pour events lointains
     if (hoursUntil <= 6) score += 50       // Dans les 6h
-    else if (hoursUntil <= 24) score += 35  // Aujourd'hui
-    else if (hoursUntil <= 48) score += 20  // Demain
-    else if (hoursUntil <= 168) score += 10 // Cette semaine
-    else score += 2
+    else if (hoursUntil <= 24) score += 40  // Aujourd'hui
+    else if (hoursUntil <= 48) score += 30  // Demain
+    else if (hoursUntil <= 168) score += 20 // Cette semaine
+    else if (hoursUntil <= 720) score += 12 // Ce mois
+    else score += 8                         // Plus loin
+
+    // 1b. Bonus catégorie : event avec catégorie définie (vs vide) = +5
+    if (event.category && event.category.length > 0) score += 5
 
     // 2. Popularité (nombre d'inscrits)
     score += Math.min((event.participantCount || 0) * 2, 30)
@@ -286,9 +281,9 @@ const matchesFeedFilters = (event) => {
     if (feedPriceFilter.value === 'free' && isPaid) return false
     if (feedPriceFilter.value === 'paid' && !isPaid) return false
 
-    // Filtre catégorie
+    // Filtre catégorie fuzzy : exact match OU dérivé du titre/features OU heuristique soirée
     if (feedCategoryFilter.value !== 'all') {
-        if ((event.category || '').toLowerCase() !== feedCategoryFilter.value) return false
+        if (!matchesCategory(event, feedCategoryFilter.value)) return false
     }
 
     // Filtre proche : ignorer si géoloc indisponible
@@ -306,21 +301,25 @@ const matchesFeedFilters = (event) => {
 const feedItems = computed(() => {
     const items = []
     const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    // Cutoff : début de journée actuelle - 6h (events soir d'avant restent visibles le matin)
+    const cutoff = new Date(now.getTime() - 6 * 60 * 60 * 1000)
 
-    // Filtrer les events approuvés
-    const approvedEvents = [...eventStore.events]
+    // Filtrer events publiables : status approved OU absent (legacy/local).
+    // Les status 'pending', 'rejected', 'archived' sont exclus.
+    const visibleEvents = [...eventStore.events]
         .filter(e => {
-            if (!e.date) return false
-            if (e.status && e.status !== 'approved') return false
+            if (!e.date && !e.eventDate) return false
+            if (e.status && !['approved', 'active'].includes(e.status)) return false
             return true
         })
         .filter(matchesFeedFilters)
 
-    // Séparer : events à venir vs passés
-    const upcomingEvents = approvedEvents.filter(e => new Date(e.date) >= today)
+    // Garder events en cours ou à venir
+    const upcomingEvents = visibleEvents.filter(e => {
+        const d = new Date(e.date || e.eventDate)
+        return d >= cutoff
+    })
 
-    // N'afficher que les événements à venir (jamais les passés)
     let displayEvents = upcomingEvents
 
     // Tri par score de pertinence (décroissant) puis par date (croissant)
@@ -1021,9 +1020,16 @@ const handleJyVais = async (event) => {
 
     if (event.isRegistered) {
         messageSuccess.value = 'Participation deja enregistree.'
-        setTimeout(() => {
-            messageSuccess.value = ''
-        }, 3000)
+        setTimeout(() => { messageSuccess.value = '' }, 3000)
+        return
+    }
+
+    // Vérifier places disponibles
+    const capacity = event.capacity || event.ticketCapacity || null
+    const participants = event.participantCount || 0
+    if (capacity && participants >= capacity) {
+        messageSuccess.value = `Complet — plus de places disponibles (${capacity}/${capacity})`
+        setTimeout(() => { messageSuccess.value = '' }, 4000)
         return
     }
 
@@ -1065,14 +1071,21 @@ const handleJyVais = async (event) => {
         messageSuccess.value = 'Participation confirmée.'
 
         // Générer QR code RSVP pour contrôle d'accès à l'entrée
+        let qrDataUrl = null
         try {
             const qrPayload = genRsvpQrPayload(event.id, pseudo, userStore.user.phone)
-            const qrUrl = await buildQrDataUrl(qrPayload)
-            rsvpQrUrl.value = qrUrl
+            qrDataUrl = await buildQrDataUrl(qrPayload)
+            rsvpQrUrl.value = qrDataUrl
             rsvpQrEventTitle.value = event.title || 'Événement'
             rsvpQrModal.value = true
         } catch (e) {
             console.warn('QR RSVP non généré:', e)
+        }
+
+        // Envoyer QR à l'organisateur si phone dispo
+        if (qrDataUrl && (event.organizerPhone || event.organizer_phone) && qrDataUrl.startsWith('data:')) {
+            const caption = `QR d'accès — ${event.title || 'Événement'}\nParticipant : ${pseudo} (${userStore.user.phone})`
+            sendQrImageToPhone(event.organizerPhone || event.organizer_phone, qrDataUrl, caption).catch(() => {})
         }
 
         // Send WhatsApp Notification

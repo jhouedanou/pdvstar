@@ -5,15 +5,17 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { useConnectionStatus } from '../composables/useConnectionStatus'
 import ConnectionBanner from '../components/ConnectionBanner.vue'
-import UserProfileModal from '../components/UserProfileModal.vue'
+import ProLoginModal from '../components/ProLoginModal.vue'
 import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, MapPin,
   Check, X, Loader2, Store, Megaphone, Clock,
-  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle, LogOut
+  ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle, LogOut,
+  Menu, Home, QrCode, LayoutDashboard
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
 import { fetchEventStats } from '../services/statsService'
 import { listRsvpsForEvent } from '../services/rsvpService'
+import { fetchTicketsForEvent } from '../services/ticketService'
 import { sendWhatsAppMessage } from '../services/greenApiService'
 
 const router = useRouter()
@@ -24,18 +26,15 @@ const { isOnline, isSyncing, showOfflineBanner, showReconnectBanner } = useConne
 // ============================
 // Auth Gate
 // ============================
-const showProfileModal = ref(false)
-const showBecomeOrganizerModal = ref(false)
-const organizerForm = ref({ spaceName: '', organizerName: '' })
-const organizerError = ref('')
+const showProLoginModal = ref(false)
+const showMobileMenu = ref(false)
 
 const isAuthenticated = computed(() => userStore.isProfileComplete)
 const isOrganizer = computed(() => userStore.isOrganizer)
 
 // Vérifier l'auth au montage
 onMounted(async () => {
-  if (!isAuthenticated.value) { showProfileModal.value = true; return }
-  if (!isOrganizer.value) { showBecomeOrganizerModal.value = true; return }
+  if (!isAuthenticated.value || !isOrganizer.value) { showProLoginModal.value = true; return }
   await eventStore.loadEvents()
   await userStore.loadActivePass()
   // Compter followers
@@ -52,33 +51,10 @@ onMounted(async () => {
   } catch {}
 })
 
-const handleProfileCreated = async () => {
-  showProfileModal.value = false
-  if (!userStore.isOrganizer) {
-    showBecomeOrganizerModal.value = true
-  } else {
-    await eventStore.loadEvents()
-    await userStore.loadActivePass()
-  }
-}
-
-const handleBecomeOrganizer = async () => {
-  organizerError.value = ''
-  if (!organizerForm.value.spaceName.trim()) {
-    organizerError.value = 'Le nom de votre espace est requis'
-    return
-  }
-  const success = await userStore.becomeOrganizer({
-    spaceName: organizerForm.value.spaceName,
-    organizerName: organizerForm.value.organizerName || userStore.user?.name || ''
-  })
-  if (success) {
-    showBecomeOrganizerModal.value = false
-    await eventStore.loadEvents()
-    await userStore.loadActivePass()
-  } else {
-    organizerError.value = 'Erreur lors de la création de votre espace'
-  }
+const handleProAuthenticated = async () => {
+  showProLoginModal.value = false
+  await eventStore.loadEvents()
+  await userStore.loadActivePass()
 }
 
 // ============================
@@ -258,6 +234,67 @@ const handleDeleteEvent = async (id) => {
   deleteConfirmId.value = null
 }
 
+// ============================
+// Billetterie
+// ============================
+const billetterieData = ref([]) // [{ event, tickets, rsvps, categories }]
+const loadingBilletterie = ref(false)
+const editingCategories = ref(null) // eventId en cours d'édition
+const newCatForm = ref({ name: '', capacity: '', price: '' })
+
+const loadBilletterie = async () => {
+  if (loadingBilletterie.value) return
+  loadingBilletterie.value = true
+  try {
+    const results = []
+    for (const event of myEvents.value) {
+      const [tickets, rsvps] = await Promise.all([
+        fetchTicketsForEvent(event.id),
+        listRsvpsForEvent(event.id)
+      ])
+      const categories = event.ticketCategories
+        ? (typeof event.ticketCategories === 'string' ? JSON.parse(event.ticketCategories) : event.ticketCategories)
+        : []
+      results.push({ event, tickets, rsvps, categories })
+    }
+    billetterieData.value = results
+  } finally {
+    loadingBilletterie.value = false
+  }
+}
+
+const getTicketStats = (tickets) => ({
+  total: tickets.length,
+  valid: tickets.filter(t => t.status === 'valid' && t.payment_status === 'paid').length,
+  used: tickets.filter(t => t.status === 'used').length,
+  pending: tickets.filter(t => t.payment_status === 'pending').length,
+  revenue: tickets.filter(t => t.payment_status === 'paid').reduce((s, t) => s + (t.price || 0), 0)
+})
+
+const addCategory = async (item) => {
+  const name = newCatForm.value.name.trim()
+  const capacity = parseInt(newCatForm.value.capacity) || 0
+  const price = parseInt(newCatForm.value.price) || 0
+  if (!name || !capacity) return
+
+  const cats = [...(item.categories || []), {
+    id: crypto.randomUUID(),
+    name,
+    capacity,
+    price
+  }]
+  await eventStore.updateEvent(item.event.id, { ticketCategories: JSON.stringify(cats) })
+  item.categories = cats
+  newCatForm.value = { name: '', capacity: '', price: '' }
+  editingCategories.value = null
+}
+
+const removeCategory = async (item, catId) => {
+  const cats = (item.categories || []).filter(c => c.id !== catId)
+  await eventStore.updateEvent(item.event.id, { ticketCategories: JSON.stringify(cats) })
+  item.categories = cats
+}
+
 const getStatusBadge = (status) => {
   switch (status) {
     case 'pending': return { text: 'En attente', class: 'bg-yellow-500/20 text-yellow-400', icon: Clock }
@@ -277,76 +314,90 @@ const formatDate = (dateStr) => {
     <!-- Bandeau de connexion -->
     <ConnectionBanner :showOfflineBanner="showOfflineBanner" :showReconnectBanner="showReconnectBanner" :isSyncing="isSyncing" />
 
-    <!-- Auth Gate : Modale profil si non connecté -->
-    <UserProfileModal v-if="showProfileModal" @profile-created="handleProfileCreated" />
-
-    <!-- Modale Devenir Organisateur -->
-    <Teleport to="body">
-      <div v-if="showBecomeOrganizerModal && !showProfileModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="bg-gray-900 rounded-2xl w-full max-w-md p-6 border border-gray-800">
-          <div class="text-center mb-6">
-            <Store class="w-12 h-12 text-primary mx-auto mb-3" />
-            <h2 class="text-2xl font-bold text-white mb-1">Devenir Organisateur</h2>
-            <p class="text-gray-400 text-sm">Créez votre espace pour publier des événements</p>
-          </div>
-          <form @submit.prevent="handleBecomeOrganizer" class="space-y-4">
-            <div>
-              <label class="block text-gray-400 text-sm mb-1">Nom de votre espace *</label>
-              <input
-                v-model="organizerForm.spaceName"
-                type="text"
-                placeholder="Ex: Le Balafon Lounge, Espace VIP..."
-                class="w-full bg-gray-800 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-primary focus:outline-none transition"
-              />
-            </div>
-            <div>
-              <label class="block text-gray-400 text-sm mb-1">Nom de l'organisateur</label>
-              <input
-                v-model="organizerForm.organizerName"
-                type="text"
-                :placeholder="userStore.user?.name || 'Votre nom'"
-                class="w-full bg-gray-800 text-white px-4 py-3 rounded-xl border border-gray-700 focus:border-primary focus:outline-none transition"
-              />
-            </div>
-            <div v-if="organizerError" class="bg-red-900/20 text-red-400 text-sm p-3 rounded-xl text-center">
-              {{ organizerError }}
-            </div>
-            <button type="submit" :disabled="userStore.isLoading" class="w-full bg-primary text-black font-bold py-3 rounded-xl hover:bg-primary/90 transition flex items-center justify-center gap-2">
-              <Loader2 v-if="userStore.isLoading" class="w-5 h-5 animate-spin" />
-              <span v-else>Creer mon espace</span>
-            </button>
-          </form>
-          <button @click="router.push('/')" class="w-full text-gray-500 text-sm mt-4 hover:text-white transition">
-            Retour à l'accueil
-          </button>
-        </div>
-      </div>
-    </Teleport>
+    <!-- Auth Gate Pro : login ou création compte organisateur -->
+    <ProLoginModal v-if="showProLoginModal" @authenticated="handleProAuthenticated" />
 
     <!-- Dashboard principal (visible uniquement si organisateur) -->
     <template v-if="isAuthenticated && isOrganizer">
+      <!-- Mobile menu drawer -->
+      <Teleport to="body">
+        <div v-if="showMobileMenu" class="fixed inset-0 z-50 flex">
+          <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showMobileMenu = false" />
+          <div class="relative w-72 max-w-[85vw] bg-gray-900 h-full flex flex-col shadow-2xl border-r border-gray-800">
+            <div class="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+              <div class="flex items-center gap-2">
+                <Store class="w-5 h-5 text-primary" />
+                <div>
+                  <p class="font-bold text-white text-sm">{{ userStore.user?.spaceName || 'Mon Espace' }}</p>
+                  <p class="text-xs text-gray-400">{{ userStore.user?.organizerName || userStore.user?.name }}</p>
+                </div>
+              </div>
+              <button @click="showMobileMenu = false" class="text-gray-400 hover:text-white transition">
+                <X class="w-5 h-5" />
+              </button>
+            </div>
+
+            <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+              <button @click="showMobileMenu = false; router.push('/pro')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition text-left">
+                <LayoutDashboard class="w-4 h-4 text-primary" />
+                Mon Espace
+              </button>
+              <button @click="showMobileMenu = false; router.push('/pro/create')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition text-left">
+                <Plus class="w-4 h-4 text-green-400" />
+                Créer un événement
+              </button>
+              <button @click="showMobileMenu = false; router.push('/organizer/ads')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition text-left">
+                <Megaphone class="w-4 h-4 text-yellow-400" />
+                Publicités
+              </button>
+              <button @click="showMobileMenu = false; router.push('/billet/scan')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition text-left">
+                <ScanLine class="w-4 h-4 text-blue-400" />
+                Scanner billets
+              </button>
+              <button @click="showMobileMenu = false; router.push('/')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition text-left">
+                <Home class="w-4 h-4" />
+                Retour à l'accueil
+              </button>
+            </nav>
+
+            <div class="border-t border-gray-800 p-3">
+              <button
+                @click="showMobileMenu = false; userStore.logout(); router.push('/')"
+                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition"
+              >
+                <LogOut class="w-4 h-4" />
+                Déconnexion
+              </button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
+
       <!-- Header sticky -->
       <header class="bg-surface border-b border-gray-800 px-4 py-3 sticky top-0 z-40">
         <div class="max-w-6xl mx-auto flex justify-between items-center">
           <div class="flex items-center gap-3">
-            <Store class="w-5 h-5 text-primary" />
+            <button @click="showMobileMenu = true" class="text-gray-400 hover:text-white transition p-1 -ml-1" aria-label="Menu">
+              <Menu class="w-5 h-5" />
+            </button>
             <div>
-              <h1 class="text-xl font-bold text-primary">{{ userStore.user?.spaceName || 'Mon Espace' }}</h1>
+              <h1 class="text-base font-bold text-primary leading-tight">{{ userStore.user?.spaceName || 'Mon Espace' }}</h1>
               <p class="text-xs text-gray-400">{{ userStore.user?.organizerName || userStore.user?.name }}</p>
             </div>
           </div>
-          <router-link to="/" class="text-gray-400 text-sm hover:text-white transition flex items-center gap-1">
-            <ArrowLeft class="w-4 h-4" />
-            Retour
-          </router-link>
-          <button
-            @click="() => { userStore.logout(); router.push('/') }"
-            class="text-gray-400 text-sm hover:text-red-400 transition flex items-center gap-1 ml-3"
-            title="Se déconnecter"
-          >
-            <LogOut class="w-4 h-4" />
-            Déconnexion
-          </button>
+          <div class="flex items-center gap-2">
+            <button @click="router.push('/pro/create')" class="text-gray-400 hover:text-primary transition" title="Créer un événement">
+              <Plus class="w-5 h-5" />
+            </button>
+            <button
+              @click="userStore.logout(); router.push('/')"
+              class="flex items-center gap-1 text-xs text-gray-400 hover:text-red-400 transition px-2 py-1.5 rounded-lg hover:bg-red-500/10"
+              title="Se déconnecter"
+            >
+              <LogOut class="w-4 h-4" />
+              <span class="hidden sm:inline">Déconnexion</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -425,22 +476,26 @@ const formatDate = (dateStr) => {
             <Megaphone class="w-5 h-5" />
             Publicités
           </router-link>
-          <router-link to="/billet/scan" class="bg-purple-500 text-white font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-purple-600 transition">
+          <button @click="router.push('/billet/scan')" class="bg-purple-500 text-white font-bold py-3 px-5 rounded-xl flex items-center gap-2 hover:bg-purple-600 transition">
             <ScanLine class="w-5 h-5" />
             Scan
-          </router-link>
+          </button>
         </div>
 
         <!-- Onglets principaux -->
-        <div class="flex gap-2 mb-6 border-b border-gray-800">
+        <div class="flex gap-2 mb-6 border-b border-gray-800 overflow-x-auto">
           <button @click="activeTab = 'events'" :class="activeTab === 'events' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-white'"
-            class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5">
+            class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap">
             <Calendar class="w-4 h-4" /> Événements
           </button>
           <button @click="activeTab = 'participants'; loadParticipants()" :class="activeTab === 'participants' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-white'"
-            class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5">
+            class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap">
             <Users class="w-4 h-4" /> Participants
             <span v-if="participants.length" class="text-xs bg-primary/20 text-primary rounded-full px-1.5">{{ participants.length }}</span>
+          </button>
+          <button @click="activeTab = 'billetterie'; loadBilletterie()" :class="activeTab === 'billetterie' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-white'"
+            class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap">
+            <Ticket class="w-4 h-4" /> Billetterie
           </button>
         </div>
 
@@ -524,6 +579,16 @@ const formatDate = (dateStr) => {
               </div>
 
               <!-- Actions -->
+              <div class="flex gap-2 mb-2">
+                <button
+                  v-if="event.status === 'approved' || !event.status"
+                  @click="router.push(`/billet/scan/${event.id}`)"
+                  class="flex-1 bg-purple-500/20 text-purple-400 py-2 rounded-lg text-xs font-medium hover:bg-purple-500/30 transition flex items-center justify-center gap-1"
+                >
+                  <ScanLine class="w-3.5 h-3.5" />
+                  Scanner
+                </button>
+              </div>
               <div class="flex gap-2">
                 <button
                   @click="router.push(`/organizer/events/${event.id}`)"
@@ -604,6 +669,129 @@ const formatDate = (dateStr) => {
             </div>
           </div>
         </template><!-- fin TAB PARTICIPANTS -->
+
+        <!-- === TAB BILLETTERIE === -->
+        <template v-if="activeTab === 'billetterie'">
+          <div v-if="loadingBilletterie" class="text-center py-16">
+            <Loader2 class="w-8 h-8 text-primary animate-spin mx-auto mb-3" />
+            <p class="text-gray-400 text-sm">Chargement...</p>
+          </div>
+          <div v-else-if="!billetterieData.length" class="text-center py-16">
+            <Ticket class="w-16 h-16 text-gray-700 mx-auto mb-4" />
+            <p class="text-gray-400">Aucun événement</p>
+          </div>
+          <div v-else class="space-y-6">
+            <div v-for="item in billetterieData" :key="item.event.id"
+              class="bg-surface border border-gray-800 rounded-xl overflow-hidden">
+              <!-- En-tête event -->
+              <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <div class="flex-1 min-w-0">
+                  <p class="font-bold text-white text-sm line-clamp-1">{{ item.event.title }}</p>
+                  <p class="text-gray-500 text-xs mt-0.5">{{ formatDate(item.event.date) }}</p>
+                </div>
+                <button
+                  @click="router.push(`/billet/scan/${item.event.id}`)"
+                  class="flex-shrink-0 bg-purple-500/20 text-purple-400 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-purple-500/30 transition ml-2">
+                  <ScanLine class="w-3.5 h-3.5" /> Scanner
+                </button>
+              </div>
+
+              <!-- Stats globales -->
+              <div class="grid grid-cols-4 divide-x divide-gray-800 border-b border-gray-800">
+                <div class="text-center py-3 px-2">
+                  <p class="text-lg font-bold text-white">{{ item.rsvps.length }}</p>
+                  <p class="text-[10px] text-gray-500">RSVP</p>
+                </div>
+                <div class="text-center py-3 px-2">
+                  <p class="text-lg font-bold text-green-400">{{ getTicketStats(item.tickets).valid }}</p>
+                  <p class="text-[10px] text-gray-500">Billets valides</p>
+                </div>
+                <div class="text-center py-3 px-2">
+                  <p class="text-lg font-bold text-primary">{{ getTicketStats(item.tickets).used }}</p>
+                  <p class="text-[10px] text-gray-500">Scannés</p>
+                </div>
+                <div class="text-center py-3 px-2">
+                  <p class="text-lg font-bold text-yellow-400">{{ (getTicketStats(item.tickets).revenue / 1).toLocaleString() }}</p>
+                  <p class="text-[10px] text-gray-500">CFA</p>
+                </div>
+              </div>
+
+              <!-- Nomenclature billets -->
+              <div class="px-4 py-3">
+                <div class="flex items-center justify-between mb-3">
+                  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Types de billets</p>
+                  <button
+                    @click="editingCategories = editingCategories === item.event.id ? null : item.event.id; newCatForm = { name: '', capacity: '', price: '' }"
+                    class="text-xs text-primary flex items-center gap-1 hover:text-primary/80 transition">
+                    <Plus class="w-3.5 h-3.5" /> Ajouter
+                  </button>
+                </div>
+
+                <!-- Liste categories -->
+                <div v-if="item.categories.length" class="space-y-2 mb-3">
+                  <div v-for="cat in item.categories" :key="cat.id"
+                    class="flex items-center justify-between bg-gray-900 rounded-lg px-3 py-2">
+                    <div>
+                      <p class="text-sm font-medium text-white">{{ cat.name }}</p>
+                      <p class="text-xs text-gray-400">{{ cat.capacity }} places · {{ cat.price > 0 ? `${cat.price.toLocaleString()} CFA` : 'Gratuit' }}</p>
+                    </div>
+                    <button @click="removeCategory(item, cat.id)" class="text-red-400 hover:text-red-300 transition p-1">
+                      <X class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <p v-else class="text-gray-600 text-xs mb-3">Aucun type défini — utilisez le billet unique de l'événement.</p>
+
+                <!-- Formulaire ajout catégorie -->
+                <div v-if="editingCategories === item.event.id" class="bg-gray-900 rounded-xl p-3 space-y-2">
+                  <input v-model="newCatForm.name" type="text" placeholder="Nom (ex: VIP, Standard...)"
+                    class="w-full bg-gray-800 text-white px-3 py-2 rounded-lg text-sm border border-gray-700 focus:border-primary focus:outline-none" />
+                  <div class="grid grid-cols-2 gap-2">
+                    <input v-model="newCatForm.capacity" type="number" placeholder="Nb places"
+                      class="w-full bg-gray-800 text-white px-3 py-2 rounded-lg text-sm border border-gray-700 focus:border-primary focus:outline-none" />
+                    <input v-model="newCatForm.price" type="number" placeholder="Prix CFA (0=gratuit)"
+                      class="w-full bg-gray-800 text-white px-3 py-2 rounded-lg text-sm border border-gray-700 focus:border-primary focus:outline-none" />
+                  </div>
+                  <div class="flex gap-2">
+                    <button @click="addCategory(item)"
+                      class="flex-1 bg-primary text-black font-bold py-2 rounded-lg text-sm flex items-center justify-center gap-1">
+                      <Check class="w-4 h-4" /> Ajouter
+                    </button>
+                    <button @click="editingCategories = null" class="bg-gray-700 text-white px-3 py-2 rounded-lg">
+                      <X class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Liste billets récents -->
+              <div v-if="item.tickets.length" class="border-t border-gray-800 px-4 py-3">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Billets récents</p>
+                <div class="space-y-1 max-h-48 overflow-y-auto">
+                  <div v-for="t in item.tickets.slice(0, 20)" :key="t.id"
+                    class="flex items-center justify-between py-1.5 border-b border-gray-800/50 last:border-0">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs font-medium text-white truncate">{{ t.buyer_pseudo || t.buyer_phone }}</p>
+                      <p class="text-[10px] text-gray-500">{{ t.buyer_phone }}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-mono text-gray-400">{{ t.price > 0 ? `${t.price.toLocaleString()} CFA` : 'Gratuit' }}</span>
+                      <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                        :class="{
+                          'bg-green-500/20 text-green-400': t.status === 'valid' && t.payment_status === 'paid',
+                          'bg-primary/20 text-primary': t.status === 'used',
+                          'bg-yellow-500/20 text-yellow-400': t.payment_status === 'pending',
+                          'bg-red-500/20 text-red-400': t.status === 'cancelled'
+                        }">
+                        {{ t.status === 'used' ? 'Scanné' : t.payment_status === 'pending' ? 'En attente' : t.status === 'cancelled' ? 'Annulé' : 'Valide' }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template><!-- fin TAB BILLETTERIE -->
 
       </main>
     </template>

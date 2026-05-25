@@ -2,10 +2,13 @@
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '../stores/userStore'
 import { processImage } from '../utils/imageUpload'
-import { Phone, User, MapPin, Camera, Loader2 } from 'lucide-vue-next'
+import { Phone, User, MapPin, Camera, Loader2, ShieldCheck } from 'lucide-vue-next'
+import { sendOtp, verifyOtp } from '../services/otpService'
 
 const userStore = useUserStore()
 const emit = defineEmits(['profile-created'])
+
+const step = ref('form') // 'form' | 'otp'
 
 const formData = ref({
     phone: '',
@@ -17,10 +20,14 @@ const formData = ref({
     photoPreview: ''
 })
 
+const otpCode = ref('')
 const isLoading = ref(false)
+const isSendingOtp = ref(false)
 const isLocating = ref(false)
 const error = ref('')
 const imageError = ref('')
+const resendCooldown = ref(0)
+let cooldownTimer = null
 
 onMounted(async () => {
     const savedPhone = localStorage.getItem('last_phone_input')
@@ -57,21 +64,46 @@ const handlePhotoChange = async (e) => {
     formData.value.photo = file
 }
 
+const startCooldown = () => {
+    resendCooldown.value = 60
+    clearInterval(cooldownTimer)
+    cooldownTimer = setInterval(() => {
+        resendCooldown.value--
+        if (resendCooldown.value <= 0) clearInterval(cooldownTimer)
+    }, 1000)
+}
+
 const handleSubmit = async () => {
     error.value = ''
-
-    if (!formData.value.phone.trim()) {
-        error.value = 'Le numero de telephone est requis'
-        return
-    }
-
-    if (!formData.value.name.trim()) {
-        error.value = 'Un pseudo est requis'
-        return
-    }
+    if (!formData.value.phone.trim()) { error.value = 'Le numero de telephone est requis'; return }
+    if (!formData.value.name.trim()) { error.value = 'Un pseudo est requis'; return }
 
     localStorage.setItem('last_phone_input', formData.value.phone)
     localStorage.setItem('last_name_input', formData.value.name)
+
+    isSendingOtp.value = true
+    try {
+        await sendOtp(formData.value.phone)
+        step.value = 'otp'
+        startCooldown()
+    } catch (err) {
+        console.error('OTP send failed:', err)
+        error.value = `Echec envoi: ${err.message || 'inconnu'}`
+    } finally {
+        isSendingOtp.value = false
+    }
+}
+
+const handleVerifyOtp = async () => {
+    error.value = ''
+    if (!otpCode.value.trim()) { error.value = 'Entrez le code reçu'; return }
+
+    const result = verifyOtp(formData.value.phone, otpCode.value)
+    if (!result.valid) {
+        if (result.reason === 'expired') error.value = 'Code expiré. Renvoyez un nouveau code.'
+        else error.value = 'Code incorrect. Réessayez.'
+        return
+    }
 
     isLoading.value = true
     try {
@@ -93,107 +125,176 @@ const handleSubmit = async () => {
         isLoading.value = false
     }
 }
+
+const handleResendOtp = async () => {
+    if (resendCooldown.value > 0) return
+    error.value = ''
+    isSendingOtp.value = true
+    try {
+        await sendOtp(formData.value.phone)
+        startCooldown()
+        otpCode.value = ''
+    } catch {
+        error.value = 'Erreur lors de l\'envoi. Réessayez.'
+    } finally {
+        isSendingOtp.value = false
+    }
+}
 </script>
 
 <template>
   <div class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div class="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-gray-200 dark:border-gray-800 transition-colors duration-300">
-      <div class="mb-6 text-center">
-        <h1 class="text-2xl font-black tracking-tight text-gray-900 dark:text-white mb-1">BABI VIBES</h1>
-        <p class="text-gray-500 dark:text-gray-400 text-sm">Cree ton profil rapide pour continuer</p>
-      </div>
 
-      <form @submit.prevent="handleSubmit" class="space-y-5">
-        <div class="flex justify-center">
-          <label class="relative w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-700 flex flex-col items-center justify-center cursor-pointer overflow-hidden group hover:border-primary transition-colors">
-            <img v-if="formData.photoPreview" :src="formData.photoPreview" class="w-full h-full object-cover" />
-            <div v-else class="flex flex-col items-center text-gray-400 group-hover:text-primary">
-              <Camera class="w-8 h-8 mb-1" />
-              <span class="text-[10px] font-bold">Photo</span>
-            </div>
-            <input type="file" accept="image/*" @change="handlePhotoChange" class="hidden" />
-          </label>
-        </div>
-        <p v-if="imageError" class="text-red-500 text-xs text-center font-medium">{{ imageError }}</p>
-
-        <div>
-          <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Pseudo</label>
-          <div class="relative">
-            <User class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              v-model="formData.name"
-              type="text"
-              placeholder="Ex: Alex Plateau"
-              class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-            />
-          </div>
+      <!-- Step: form -->
+      <template v-if="step === 'form'">
+        <div class="mb-6 text-center">
+          <h1 class="text-2xl font-black tracking-tight text-gray-900 dark:text-white mb-1">BABI VIBES</h1>
+          <p class="text-gray-500 dark:text-gray-400 text-sm">Cree ton profil rapide pour continuer</p>
         </div>
 
-        <div>
-          <div class="flex justify-between items-center mb-1">
-            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500">Telephone</label>
-            <span v-if="isLocating" class="text-xs text-primary animate-pulse flex items-center gap-1">
-              <Loader2 class="w-3 h-3 animate-spin" /> Detection...
-            </span>
+        <form @submit.prevent="handleSubmit" class="space-y-5">
+          <div class="flex justify-center">
+            <label class="relative w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-700 flex flex-col items-center justify-center cursor-pointer overflow-hidden group hover:border-primary transition-colors">
+              <img v-if="formData.photoPreview" :src="formData.photoPreview" class="w-full h-full object-cover" />
+              <div v-else class="flex flex-col items-center text-gray-400 group-hover:text-primary">
+                <Camera class="w-8 h-8 mb-1" />
+                <span class="text-[10px] font-bold">Photo</span>
+              </div>
+              <input type="file" accept="image/*" @change="handlePhotoChange" class="hidden" />
+            </label>
           </div>
-          <div class="relative">
-            <Phone class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              v-model="formData.phone"
-              type="tel"
-              placeholder="+2250700000000"
-              class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-            />
-          </div>
-          <p class="text-[10px] text-gray-500 mt-1.5 ml-1">Utilise pour les confirmations WhatsApp.</p>
-        </div>
+          <p v-if="imageError" class="text-red-500 text-xs text-center font-medium">{{ imageError }}</p>
 
-        <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Ville</label>
+            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Pseudo</label>
             <div class="relative">
-              <MapPin class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <User class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
-                v-model="formData.city"
+                v-model="formData.name"
                 type="text"
-                placeholder="Abidjan"
-                class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                placeholder="Ex: Alex Plateau"
+                class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
               />
             </div>
           </div>
+
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Quartier</label>
+            <div class="flex justify-between items-center mb-1">
+              <label class="block text-xs font-bold uppercase tracking-wider text-gray-500">Telephone</label>
+              <span v-if="isLocating" class="text-xs text-primary animate-pulse flex items-center gap-1">
+                <Loader2 class="w-3 h-3 animate-spin" /> Detection...
+              </span>
+            </div>
+            <div class="relative">
+              <Phone class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                v-model="formData.phone"
+                type="tel"
+                placeholder="+2250700000000"
+                class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              />
+            </div>
+            <p class="text-[10px] text-gray-500 mt-1.5 ml-1">Un code de verification sera envoye sur WhatsApp.</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Ville</label>
+              <div class="relative">
+                <MapPin class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  v-model="formData.city"
+                  type="text"
+                  placeholder="Abidjan"
+                  class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-9 pr-3 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                />
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Quartier</label>
+              <input
+                v-model="formData.district"
+                type="text"
+                placeholder="Cocody"
+                class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              />
+            </div>
+          </div>
+
+          <label class="flex items-start gap-3 text-xs text-gray-500 dark:text-gray-400">
+            <input v-model="formData.consentData" type="checkbox" class="mt-0.5 accent-primary" />
+            <span>J'accepte que Babi Vibes utilise ces informations pour me proposer des evenements pertinents.</span>
+          </label>
+
+          <div v-if="error" class="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-3 rounded-xl text-center font-medium">{{ error }}</div>
+
+          <button
+            type="submit"
+            :disabled="isSendingOtp"
+            class="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-black font-black text-lg py-4 rounded-full transition-all active:scale-95 shadow-xl shadow-primary/20 mt-4 flex items-center justify-center gap-2"
+          >
+            <Loader2 v-if="isSendingOtp" class="w-5 h-5 animate-spin" />
+            <span>{{ isSendingOtp ? 'Envoi du code...' : 'Recevoir le code' }}</span>
+          </button>
+        </form>
+
+        <p class="text-[10px] text-gray-400 text-center mt-6">En continuant, tu acceptes nos conditions d'utilisation.</p>
+      </template>
+
+      <!-- Step: OTP verification -->
+      <template v-else>
+        <div class="mb-6 text-center">
+          <ShieldCheck class="w-12 h-12 text-primary mx-auto mb-3" />
+          <h2 class="text-xl font-black text-gray-900 dark:text-white">Vérification</h2>
+          <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">
+            Code envoyé sur WhatsApp au<br />
+            <span class="font-semibold text-gray-700 dark:text-gray-300">{{ formData.phone }}</span>
+          </p>
+        </div>
+
+        <div class="space-y-5">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2 text-center">Code à 6 chiffres</label>
             <input
-              v-model="formData.district"
+              v-model="otpCode"
               type="text"
-              placeholder="Cocody"
-              class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl px-3 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="_ _ _ _ _ _"
+              @keyup.enter="handleVerifyOtp"
+              class="w-full bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl px-4 py-4 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all text-center text-2xl font-mono tracking-[0.5em]"
             />
           </div>
+
+          <div v-if="error" class="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-3 rounded-xl text-center font-medium">{{ error }}</div>
+
+          <button
+            @click="handleVerifyOtp"
+            :disabled="isLoading"
+            class="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-black font-black text-lg py-4 rounded-full transition-all active:scale-95 shadow-xl shadow-primary/20 flex items-center justify-center gap-2"
+          >
+            <Loader2 v-if="isLoading" class="w-5 h-5 animate-spin" />
+            <span>{{ isLoading ? 'Vérification...' : 'Confirmer' }}</span>
+          </button>
+
+          <div class="text-center space-y-2">
+            <button
+              @click="handleResendOtp"
+              :disabled="resendCooldown > 0 || isSendingOtp"
+              class="text-sm text-primary disabled:text-gray-400 transition"
+            >
+              <Loader2 v-if="isSendingOtp" class="w-3 h-3 animate-spin inline mr-1" />
+              {{ resendCooldown > 0 ? `Renvoyer dans ${resendCooldown}s` : 'Renvoyer le code' }}
+            </button>
+            <br />
+            <button @click="step = 'form'; error = ''; otpCode = ''" class="text-xs text-gray-400 hover:text-gray-200 transition">
+              ← Modifier le numéro
+            </button>
+          </div>
         </div>
+      </template>
 
-        <label class="flex items-start gap-3 text-xs text-gray-500 dark:text-gray-400">
-          <input v-model="formData.consentData" type="checkbox" class="mt-0.5 accent-primary" />
-          <span>J'accepte que Babi Vibes utilise ces informations pour me proposer des evenements pertinents.</span>
-        </label>
-
-        <div v-if="error" class="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-3 rounded-xl text-center font-medium">
-          {{ error }}
-        </div>
-
-        <button
-          type="submit"
-          :disabled="isLoading"
-          class="w-full bg-primary hover:bg-primary/90 disabled:bg-gray-700 disabled:text-gray-400 text-black font-black text-lg py-4 rounded-full transition-all active:scale-95 shadow-xl shadow-primary/20 mt-4 flex items-center justify-center gap-2"
-        >
-          <Loader2 v-if="isLoading" class="w-5 h-5 animate-spin" />
-          <span>{{ isLoading ? 'Connexion...' : 'Continuer' }}</span>
-        </button>
-      </form>
-
-      <p class="text-[10px] text-gray-400 text-center mt-6">
-        En continuant, tu acceptes nos conditions d'utilisation.
-      </p>
     </div>
   </div>
 </template>
