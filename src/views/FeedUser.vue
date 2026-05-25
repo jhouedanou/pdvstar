@@ -21,6 +21,7 @@ import { createRsvp, markRsvpNotified, genRsvpQrPayload } from '../services/rsvp
 import { buildQrDataUrl } from '../services/ticketService'
 import { trackEventInteraction } from '../services/interactionService'
 import { EVENT_CATEGORIES, matchesCategory, deriveCategoryFromText } from '../constants/categories'
+import { downloadQrAsImage, downloadQrAsPdf } from '../utils/qrDownload'
 
 const eventStore = useEventStore()
 const userStore = useUserStore()
@@ -38,6 +39,29 @@ const { coords, resume } = useGeolocation()
 const rsvpQrModal = ref(false)
 const rsvpQrUrl = ref('')
 const rsvpQrEventTitle = ref('')
+const rsvpQrEventMeta = ref({ date: '', location: '', pseudo: '', phone: '' })
+const rsvpDownloading = ref(false)
+
+const handleDownloadQrImage = async () => {
+    if (!rsvpQrUrl.value) return
+    rsvpDownloading.value = true
+    const slug = (rsvpQrEventTitle.value || 'qr').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'qr'
+    await downloadQrAsImage(rsvpQrUrl.value, `babi-vibes-${slug}`)
+    rsvpDownloading.value = false
+}
+
+const handleDownloadQrPdf = () => {
+    if (!rsvpQrUrl.value) return
+    downloadQrAsPdf({
+        qrDataUrl: rsvpQrUrl.value,
+        eventTitle: rsvpQrEventTitle.value,
+        eventDate: rsvpQrEventMeta.value.date,
+        location: rsvpQrEventMeta.value.location,
+        pseudo: rsvpQrEventMeta.value.pseudo,
+        phone: rsvpQrEventMeta.value.phone,
+        type: 'RSVP'
+    })
+}
 
 // Get Ads from Supabase (fallback to local DB)
 const ads = ref(db.getAds())
@@ -1028,7 +1052,7 @@ const handleJyVais = async (event) => {
     const capacity = event.capacity || event.ticketCapacity || null
     const participants = event.participantCount || 0
     if (capacity && participants >= capacity) {
-        messageSuccess.value = `Complet — plus de places disponibles (${capacity}/${capacity})`
+        messageSuccess.value = `Complet — aucune place disponible (${participants}/${capacity})`
         setTimeout(() => { messageSuccess.value = '' }, 4000)
         return
     }
@@ -1077,15 +1101,22 @@ const handleJyVais = async (event) => {
             qrDataUrl = await buildQrDataUrl(qrPayload)
             rsvpQrUrl.value = qrDataUrl
             rsvpQrEventTitle.value = event.title || 'Événement'
+            rsvpQrEventMeta.value = {
+                date: event.date ? new Date(event.date).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '',
+                location: event.location || event.address || '',
+                pseudo,
+                phone: userStore.user.phone || ''
+            }
             rsvpQrModal.value = true
         } catch (e) {
             console.warn('QR RSVP non généré:', e)
         }
 
-        // Envoyer QR à l'organisateur si phone dispo
-        if (qrDataUrl && (event.organizerPhone || event.organizer_phone) && qrDataUrl.startsWith('data:')) {
+        // Envoyer QR à l'organisateur si phone dispo (uniquement si dataURL base64, pas URL externe)
+        const orgaPhone = event.organizerPhone || event.organizer_phone
+        if (qrDataUrl && orgaPhone && typeof qrDataUrl === 'string' && qrDataUrl.startsWith('data:image/')) {
             const caption = `QR d'accès — ${event.title || 'Événement'}\nParticipant : ${pseudo} (${userStore.user.phone})`
-            sendQrImageToPhone(event.organizerPhone || event.organizer_phone, qrDataUrl, caption).catch(() => {})
+            sendQrImageToPhone(orgaPhone, qrDataUrl, caption).catch(err => console.warn('QR WhatsApp orga failed:', err))
         }
 
         // Send WhatsApp Notification
@@ -1520,7 +1551,19 @@ const handleDeleteEvent = async (eventId) => {
             <img v-if="rsvpQrUrl" :src="rsvpQrUrl" class="w-full h-full object-contain" alt="QR code d'entrée" />
             <div v-else class="text-gray-400 text-xs">Génération...</div>
           </div>
-          <p class="text-gray-500 text-xs mt-3 mb-5">Ce QR est unique. Gardez-le précieusement.</p>
+          <p class="text-gray-500 text-xs mt-3 mb-4">Ce QR est unique. Gardez-le précieusement.</p>
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <button @click="handleDownloadQrImage" :disabled="rsvpDownloading || !rsvpQrUrl"
+              class="bg-gray-800 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-gray-700 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              PNG
+            </button>
+            <button @click="handleDownloadQrPdf" :disabled="!rsvpQrUrl"
+              class="bg-gray-800 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-gray-700 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              PDF
+            </button>
+          </div>
           <button @click="rsvpQrModal = false" class="w-full bg-primary text-black font-bold py-3 rounded-xl">
             Fermer
           </button>

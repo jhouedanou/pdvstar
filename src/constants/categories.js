@@ -39,11 +39,11 @@ export const matchesCategory = (event, categoryFilter) => {
     if (stored === categoryFilter) return true
     const derived = deriveCategoryFromText(event.title, event.features)
     if (derived === categoryFilter) return true
-    // Soirée : inclusif si event en soirée (>= 18h) sans catégorie définie
+    // Soirée : inclusif si event en soirée (>= 18h ou avant 5h du matin) sans catégorie définie
     if (categoryFilter === 'soiree' && !stored) {
         try {
             const h = new Date(event.date).getHours()
-            if (h >= 18 || h <= 4) return true
+            if (h >= 18 || h < 5) return true
         } catch {}
     }
     return false

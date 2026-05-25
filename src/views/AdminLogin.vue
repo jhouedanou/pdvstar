@@ -86,8 +86,21 @@ const handleVerifyOtp = async () => {
 
   isLoading.value = true
   try {
+    // Re-fetch user pour vérifier rôle à jour (anti-stale)
+    const { data: fresh } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', fullPhone)
+      .maybeSingle()
+
+    const finalUser = fresh || pendingUser
+    if (finalUser.role !== 'admin' && finalUser.role_v2 !== 'admin') {
+      loginError.value = 'Rôle modifié — accès refusé.'
+      return
+    }
+
     localStorage.setItem('pdvstar_admin_session', JSON.stringify({
-      user: pendingUser,
+      user: finalUser,
       expiry: Date.now() + 8 * 60 * 60 * 1000
     }))
     router.push('/admin/dashboard')

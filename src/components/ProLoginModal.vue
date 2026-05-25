@@ -95,9 +95,16 @@ const handleVerifyOtp = async () => {
   isLoading.value = true
   try {
     if (pendingAction.type === 'login') {
-      userStore.user = pendingAction.user
+      // Re-fetch role à jour avant session (évite stale role)
+      const fresh = await findUserByPhone(pendingAction.phone)
+      const userToLog = fresh || pendingAction.user
+      if (userToLog.role !== 'organizer' && userToLog.role !== 'admin') {
+        error.value = 'Rôle modifié — accès refusé.'
+        return
+      }
+      userStore.user = userToLog
       userStore.saveSession?.()
-      emit('authenticated', pendingAction.user)
+      emit('authenticated', userToLog)
     } else {
       const user = await userStore.authenticate({
         phone: pendingAction.phone,

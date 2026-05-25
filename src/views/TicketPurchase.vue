@@ -5,7 +5,8 @@ import { useEventStore } from '../stores/eventStore'
 import { useUserStore } from '../stores/userStore'
 import { createTicket, markTicketPaid, buildQrDataUrl } from '../services/ticketService'
 import { initDeposit, waitForDepositFinal, predictProvider, PAWAPAY_PROVIDERS_CI, isPaymentConfigured } from '../services/paymentService'
-import { ArrowLeft, Ticket, Loader2, CheckCircle2, XCircle } from 'lucide-vue-next'
+import { ArrowLeft, Ticket, Loader2, CheckCircle2, XCircle, Download, FileText } from 'lucide-vue-next'
+import { downloadQrAsImage, downloadQrAsPdf } from '../utils/qrDownload'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,6 +30,27 @@ const paymentReady = isPaymentConfigured()
 onMounted(async () => {
     if (!eventStore.events.length) await eventStore.loadEvents()
 })
+
+const downloading = ref(false)
+const handleDownloadImage = async () => {
+    if (!qrDataUrl.value) return
+    downloading.value = true
+    const slug = (event.value?.title || 'billet').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+    await downloadQrAsImage(qrDataUrl.value, `babi-vibes-${slug}`)
+    downloading.value = false
+}
+const handleDownloadPdf = () => {
+    if (!qrDataUrl.value || !event.value) return
+    downloadQrAsPdf({
+        qrDataUrl: qrDataUrl.value,
+        eventTitle: event.value.title,
+        eventDate: event.value.date ? new Date(event.value.date).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '',
+        location: event.value.location || event.value.address || '',
+        pseudo: ticket.value?.buyer_pseudo || '',
+        phone: ticket.value?.buyer_phone || '',
+        type: 'BILLET PAYANT'
+    })
+}
 
 const detect = async () => {
     if (!phone.value) return
@@ -168,6 +190,20 @@ const buy = async () => {
             <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR" class="w-64 h-64" />
           </div>
           <p class="text-gray-600 text-xs mt-4 break-all">{{ ticket?.qr_token }}</p>
+
+          <!-- Téléchargement -->
+          <div class="grid grid-cols-2 gap-2 mt-6 max-w-xs mx-auto">
+            <button @click="handleDownloadImage" :disabled="downloading || !qrDataUrl"
+              class="bg-gray-800 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-gray-700 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
+              <Download class="w-4 h-4" />
+              PNG
+            </button>
+            <button @click="handleDownloadPdf" :disabled="!qrDataUrl"
+              class="bg-gray-800 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-gray-700 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
+              <FileText class="w-4 h-4" />
+              PDF
+            </button>
+          </div>
         </div>
 
         <!-- Failed -->
