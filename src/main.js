@@ -87,7 +87,10 @@ router.beforeEach(async (to, from, next) => {
         const ok = await checkAdminSession()
         if (ok) return next('/admin/dashboard')
         if (hasRole(to.meta.requiresRole)) return next()
-        return next('/admin')
+        // Non autorisé : connexion organisateur sur /pro (jamais /admin, réservé aux admins).
+        // ProDashboard affiche sa propre modale de connexion, on le laisse donc passer.
+        if (to.path === '/pro') return next()
+        return next('/pro')
     }
     next()
 })
