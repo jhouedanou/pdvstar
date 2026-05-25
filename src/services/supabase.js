@@ -633,6 +633,24 @@ export async function findUserByPhone(phone) {
 }
 
 /**
+ * Recherche par email (insensible à la casse)
+ */
+export async function findUserByEmail(email) {
+    if (!email) return null
+    const normalized = email.toLowerCase().trim()
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .ilike('email', normalized)
+        .maybeSingle()
+    if (error) {
+        console.error(' Erreur findUserByEmail:', error.message)
+        return null
+    }
+    return data ? fromSupabaseUser(data) : null
+}
+
+/**
  * Créer un nouvel utilisateur
  */
 export async function createUser(userData) {

@@ -10,13 +10,14 @@ import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, MapPin,
   Check, X, Loader2, Store, Megaphone, Clock,
   ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle, LogOut,
-  Menu, Home, QrCode, LayoutDashboard
+  Menu, Home, QrCode, LayoutDashboard, Bell, BellRing
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
 import { fetchEventStats } from '../services/statsService'
 import { listRsvpsForEvent } from '../services/rsvpService'
 import { fetchTicketsForEvent } from '../services/ticketService'
 import { sendWhatsAppMessage } from '../services/greenApiService'
+import { fetchOrganizerNotifications } from '../services/notificationsService'
 
 const router = useRouter()
 const eventStore = useEventStore()
@@ -235,6 +236,75 @@ const handleDeleteEvent = async (id) => {
 }
 
 // ============================
+// Notifications
+// ============================
+const notifications = ref([])
+const loadingNotifs = ref(false)
+const loadNotifications = async () => {
+  if (loadingNotifs.value) return
+  loadingNotifs.value = true
+  try {
+    notifications.value = await fetchOrganizerNotifications(myEvents.value)
+  } catch (e) {
+    console.error('Erreur load notifs', e)
+  } finally {
+    loadingNotifs.value = false
+  }
+}
+
+const formatTimeAgo = (ts) => {
+  if (!ts) return ''
+  const diffMs = Date.now() - new Date(ts).getTime()
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return 'à l\'instant'
+  if (mins < 60) return `il y a ${mins} min`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `il y a ${hrs}h`
+  const days = Math.floor(hrs / 24)
+  return `il y a ${days}j`
+}
+
+// ============================
+// Reminders
+// ============================
+const sendingReminderEventId = ref(null)
+const reminderStatus = ref('')
+
+const sendReminderForEvent = async (event) => {
+  if (sendingReminderEventId.value) return
+  sendingReminderEventId.value = event.id
+  reminderStatus.value = ''
+  try {
+    const rsvps = await listRsvpsForEvent(event.id)
+    if (!rsvps.length) {
+      reminderStatus.value = `Aucun participant à notifier pour "${event.title}".`
+      return
+    }
+    const dateStr = event.date ? new Date(event.date).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''
+    const organizer = userStore.user?.organizerName || userStore.user?.spaceName || userStore.user?.name || 'L\'organisateur'
+    const message = `Rappel — ${event.title}\n\nC'est bientôt ! ${dateStr ? `Rendez-vous : ${dateStr}` : ''}\nLieu : ${event.location || 'Voir l\'application'}\n\nDe la part de ${organizer}\n\n— Babi Vibes`
+
+    let sent = 0
+    let failed = 0
+    for (const r of rsvps) {
+      if (!r.phone) continue
+      try {
+        await sendWhatsAppMessage(r.phone, message)
+        sent++
+      } catch {
+        failed++
+      }
+    }
+    reminderStatus.value = `Rappel envoyé : ${sent} reçu${sent > 1 ? 's' : ''}${failed > 0 ? `, ${failed} échec${failed > 1 ? 's' : ''}` : ''}.`
+  } catch (e) {
+    reminderStatus.value = `Erreur : ${e.message || 'inconnue'}`
+  } finally {
+    sendingReminderEventId.value = null
+    setTimeout(() => { reminderStatus.value = '' }, 5000)
+  }
+}
+
+// ============================
 // Billetterie
 // ============================
 const billetterieData = ref([]) // [{ event, tickets, rsvps, categories }]
@@ -401,6 +471,14 @@ const formatDate = (dateStr) => {
         </div>
       </header>
 
+      <!-- Toast statut reminder -->
+      <Transition name="slide-down">
+        <div v-if="reminderStatus" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-orange-500 text-black font-bold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 max-w-md">
+          <BellRing class="w-5 h-5" />
+          <span class="text-sm">{{ reminderStatus }}</span>
+        </div>
+      </Transition>
+
       <main class="max-w-6xl mx-auto p-4">
         <!-- Grille Stats -->
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
@@ -497,6 +575,11 @@ const formatDate = (dateStr) => {
             class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap">
             <Ticket class="w-4 h-4" /> Billetterie
           </button>
+          <button @click="activeTab = 'notifs'; loadNotifications()" :class="activeTab === 'notifs' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-white'"
+            class="pb-3 px-1 text-sm font-medium transition flex items-center gap-1.5 whitespace-nowrap">
+            <Bell class="w-4 h-4" /> Notifications
+            <span v-if="notifications.length" class="text-xs bg-orange-500/20 text-orange-400 rounded-full px-1.5">{{ notifications.length }}</span>
+          </button>
         </div>
 
         <!-- === TAB EVENTS === -->
@@ -578,15 +661,26 @@ const formatDate = (dateStr) => {
                 {{ eventStats[event.id].revenue }} CFA - commission {{ eventStats[event.id].commission }}
               </div>
 
-              <!-- Actions -->
-              <div class="flex gap-2 mb-2">
+              <!-- Actions secondaires -->
+              <div class="grid grid-cols-2 gap-2 mb-2">
                 <button
                   v-if="event.status === 'approved' || !event.status"
                   @click="router.push(`/billet/scan/${event.id}`)"
-                  class="flex-1 bg-purple-500/20 text-purple-400 py-2 rounded-lg text-xs font-medium hover:bg-purple-500/30 transition flex items-center justify-center gap-1"
+                  class="bg-purple-500/20 text-purple-400 py-2 rounded-lg text-xs font-medium hover:bg-purple-500/30 transition flex items-center justify-center gap-1"
                 >
                   <ScanLine class="w-3.5 h-3.5" />
                   Scanner
+                </button>
+                <button
+                  v-if="event.status === 'approved' || !event.status"
+                  @click="sendReminderForEvent(event)"
+                  :disabled="sendingReminderEventId === event.id"
+                  class="bg-orange-500/20 text-orange-400 py-2 rounded-lg text-xs font-medium hover:bg-orange-500/30 transition flex items-center justify-center gap-1 disabled:opacity-50"
+                  :title="`Envoyer un rappel WhatsApp à tous les participants de ${event.title}`"
+                >
+                  <Loader2 v-if="sendingReminderEventId === event.id" class="w-3.5 h-3.5 animate-spin" />
+                  <BellRing v-else class="w-3.5 h-3.5" />
+                  Rappel
                 </button>
               </div>
               <div class="flex gap-2">
@@ -792,6 +886,48 @@ const formatDate = (dateStr) => {
             </div>
           </div>
         </template><!-- fin TAB BILLETTERIE -->
+
+        <!-- === TAB NOTIFICATIONS === -->
+        <template v-if="activeTab === 'notifs'">
+          <div class="flex items-center justify-between mb-4">
+            <p class="text-xs text-gray-500">Activité sur vos événements (30 derniers jours)</p>
+            <button @click="loadNotifications" :disabled="loadingNotifs" class="text-xs text-primary disabled:opacity-50">
+              <Loader2 v-if="loadingNotifs" class="w-3 h-3 animate-spin inline mr-1" />
+              Actualiser
+            </button>
+          </div>
+          <div v-if="loadingNotifs && !notifications.length" class="text-center py-16">
+            <Loader2 class="w-8 h-8 text-primary animate-spin mx-auto mb-3" />
+            <p class="text-gray-400 text-sm">Chargement...</p>
+          </div>
+          <div v-else-if="!notifications.length" class="text-center py-16">
+            <Bell class="w-16 h-16 text-gray-700 mx-auto mb-4" />
+            <p class="text-gray-400 text-lg mb-1">Aucune notification</p>
+            <p class="text-gray-600 text-sm">L'activité sur vos événements apparaîtra ici</p>
+          </div>
+          <div v-else class="space-y-2">
+            <div v-for="n in notifications" :key="n.id"
+              @click="n.eventId && router.push(`/organizer/events/${n.eventId}`)"
+              class="bg-surface border border-gray-800 rounded-xl p-3 flex items-start gap-3 cursor-pointer hover:border-gray-700 transition">
+              <div class="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center"
+                :class="{
+                  'bg-blue-500/20 text-blue-400': n.type === 'rsvp',
+                  'bg-green-500/20 text-green-400': n.type === 'ticket' || n.type === 'approved',
+                  'bg-red-500/20 text-red-400': n.type === 'rejected'
+                }">
+                <Users v-if="n.type === 'rsvp'" class="w-4 h-4" />
+                <Ticket v-else-if="n.type === 'ticket'" class="w-4 h-4" />
+                <Check v-else-if="n.type === 'approved'" class="w-4 h-4" />
+                <X v-else-if="n.type === 'rejected'" class="w-4 h-4" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-white">{{ n.title }}</p>
+                <p class="text-xs text-gray-400 truncate">{{ n.body }}</p>
+                <p class="text-[10px] text-gray-600 mt-0.5">{{ formatTimeAgo(n.timestamp) }}</p>
+              </div>
+            </div>
+          </div>
+        </template><!-- fin TAB NOTIFICATIONS -->
 
       </main>
     </template>

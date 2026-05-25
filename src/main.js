@@ -45,6 +45,7 @@ const routes = [
     { path: '/admin/settings', component: AdminSettings, meta: { requiresAdmin: true } },
     { path: '/admin/users', component: AdminUsers, meta: { requiresAdmin: true } },
     { path: '/admin/reports', component: AdminReports, meta: { requiresAdmin: true } },
+    { path: '/admin/notifications', component: () => import('./views/AdminNotifications.vue'), meta: { requiresAdmin: true } },
     { path: '/billet/:id', component: TicketPurchase },
     { path: '/billet/scan/:eventId?', component: TicketScan, meta: { requiresRole: ['organizer', 'admin'] } },
     { path: '/legal', component: LegalPages },

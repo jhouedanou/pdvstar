@@ -2,13 +2,17 @@
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '../stores/userStore'
 import { processImage } from '../utils/imageUpload'
-import { Phone, User, MapPin, Camera, Loader2, ShieldCheck } from 'lucide-vue-next'
+import { Phone, User, MapPin, Camera, Loader2, ShieldCheck, UserCheck, UserPlus } from 'lucide-vue-next'
 import { sendOtp, verifyOtp } from '../services/otpService'
+import { findUserByPhone } from '../services/supabase'
+import PhoneInput from './PhoneInput.vue'
 
 const userStore = useUserStore()
 const emit = defineEmits(['profile-created'])
 
-const step = ref('form') // 'form' | 'otp'
+const step = ref('form') // 'form' | 'exists' | 'otp'
+const existingUser = ref(null)
+const isLoginMode = ref(false) // true = se reconnecter à compte existant
 
 const formData = ref({
     phone: '',
@@ -83,7 +87,16 @@ const handleSubmit = async () => {
 
     isSendingOtp.value = true
     try {
+        // Vérifier si compte existe déjà
+        const existing = await findUserByPhone(formData.value.phone)
+        if (existing) {
+            existingUser.value = existing
+            step.value = 'exists'
+            return
+        }
+        // Nouveau compte : envoyer OTP direct
         await sendOtp(formData.value.phone)
+        isLoginMode.value = false
         step.value = 'otp'
         startCooldown()
     } catch (err) {
@@ -92,6 +105,29 @@ const handleSubmit = async () => {
     } finally {
         isSendingOtp.value = false
     }
+}
+
+const handleLoginExisting = async () => {
+    error.value = ''
+    isSendingOtp.value = true
+    try {
+        await sendOtp(formData.value.phone)
+        isLoginMode.value = true
+        step.value = 'otp'
+        startCooldown()
+    } catch (err) {
+        console.error('OTP send failed:', err)
+        error.value = `Echec envoi: ${err.message || 'inconnu'}`
+    } finally {
+        isSendingOtp.value = false
+    }
+}
+
+const handleUseAnotherNumber = () => {
+    existingUser.value = null
+    formData.value.phone = '+225'
+    step.value = 'form'
+    error.value = ''
 }
 
 const handleVerifyOtp = async () => {
@@ -107,16 +143,25 @@ const handleVerifyOtp = async () => {
 
     isLoading.value = true
     try {
-        await userStore.authenticate({
-            name: formData.value.name,
-            pseudo: formData.value.name,
-            phone: formData.value.phone,
-            city: formData.value.city,
-            district: formData.value.district,
-            consentData: formData.value.consentData,
-            email: '',
-            avatar: formData.value.photoPreview
-        })
+        // Mode login : utiliser le compte existant (authenticate find par phone)
+        // Mode register : crée nouveau compte
+        const payload = isLoginMode.value && existingUser.value
+            ? {
+                name: existingUser.value.name,
+                pseudo: existingUser.value.pseudo || existingUser.value.name,
+                phone: formData.value.phone
+              }
+            : {
+                name: formData.value.name,
+                pseudo: formData.value.name,
+                phone: formData.value.phone,
+                city: formData.value.city,
+                district: formData.value.district,
+                consentData: formData.value.consentData,
+                email: '',
+                avatar: formData.value.photoPreview
+              }
+        await userStore.authenticate(payload)
         emit('profile-created')
     } catch (err) {
         console.error(err)
@@ -186,15 +231,7 @@ const handleResendOtp = async () => {
                 <Loader2 class="w-3 h-3 animate-spin" /> Detection...
               </span>
             </div>
-            <div class="relative">
-              <Phone class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                v-model="formData.phone"
-                type="tel"
-                placeholder="+2250700000000"
-                class="w-full bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-              />
-            </div>
+            <PhoneInput v-model="formData.phone" />
             <p class="text-[10px] text-gray-500 mt-1.5 ml-1">Un code de verification sera envoye sur WhatsApp.</p>
           </div>
 
@@ -240,6 +277,48 @@ const handleResendOtp = async () => {
         </form>
 
         <p class="text-[10px] text-gray-400 text-center mt-6">En continuant, tu acceptes nos conditions d'utilisation.</p>
+      </template>
+
+      <!-- Step: Compte existant détecté -->
+      <template v-else-if="step === 'exists'">
+        <div class="mb-6 text-center">
+          <UserCheck class="w-12 h-12 text-primary mx-auto mb-3" />
+          <h2 class="text-xl font-black text-gray-900 dark:text-white">Compte existant</h2>
+          <p class="text-gray-500 dark:text-gray-400 text-sm mt-2">
+            Un compte est déjà associé à
+          </p>
+          <p class="font-bold text-gray-800 dark:text-gray-200 mt-1">{{ formData.phone }}</p>
+          <div class="bg-gray-100 dark:bg-gray-800 rounded-xl p-3 mt-4">
+            <p class="text-xs text-gray-500 dark:text-gray-400">Pseudo enregistré</p>
+            <p class="font-bold text-gray-800 dark:text-gray-200">{{ existingUser?.pseudo || existingUser?.name || 'Utilisateur' }}</p>
+          </div>
+        </div>
+
+        <p v-if="error" class="text-red-500 text-sm text-center mb-3 bg-red-50 dark:bg-red-900/20 rounded-xl p-2">{{ error }}</p>
+
+        <div class="space-y-3">
+          <button
+            @click="handleLoginExisting"
+            :disabled="isSendingOtp"
+            class="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-black font-black py-3.5 rounded-xl flex items-center justify-center gap-2 transition active:scale-95"
+          >
+            <Loader2 v-if="isSendingOtp" class="w-5 h-5 animate-spin" />
+            <ShieldCheck v-else class="w-5 h-5" />
+            <span>Me reconnecter</span>
+          </button>
+          <button
+            @click="handleUseAnotherNumber"
+            :disabled="isSendingOtp"
+            class="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition"
+          >
+            <UserPlus class="w-5 h-5" />
+            <span>Créer un autre compte</span>
+          </button>
+        </div>
+
+        <p class="text-[10px] text-gray-400 text-center mt-5">
+          Un code de vérification sera envoyé par WhatsApp pour confirmer.
+        </p>
       </template>
 
       <!-- Step: OTP verification -->
@@ -288,7 +367,7 @@ const handleResendOtp = async () => {
               {{ resendCooldown > 0 ? `Renvoyer dans ${resendCooldown}s` : 'Renvoyer le code' }}
             </button>
             <br />
-            <button @click="step = 'form'; error = ''; otpCode = ''" class="text-xs text-gray-400 hover:text-gray-200 transition">
+            <button @click="step = 'form'; error = ''; otpCode = ''; existingUser = null; isLoginMode = false" class="text-xs text-gray-400 hover:text-gray-200 transition">
               ← Modifier le numéro
             </button>
           </div>

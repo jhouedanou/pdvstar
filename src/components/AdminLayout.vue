@@ -5,7 +5,7 @@ import { useAdminStore } from '../stores/adminStore'
 import {
     LayoutDashboard, Megaphone, BarChart2, Image, SlidersHorizontal,
     LogOut, ExternalLink, ChevronRight, ShieldCheck, Settings,
-    Users, Flag, Menu, X
+    Users, Flag, Menu, X, Bell
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -24,6 +24,7 @@ const nav = [
     {
         group: 'Modération',
         items: [
+            { label: 'Notifications', icon: Bell, to: '/admin/notifications' },
             { label: 'Utilisateurs', icon: Users, to: '/admin/users' },
             { label: 'Signalements', icon: Flag, to: '/admin/reports' },
         ]
@@ -57,6 +58,7 @@ const breadcrumb = computed(() => {
         '/admin/dashboard': 'Événements',
         '/admin/ads': 'Publicités',
         '/admin/stats': 'Statistiques',
+        '/admin/notifications': 'Notifications',
         '/admin/users': 'Utilisateurs',
         '/admin/reports': 'Signalements',
         '/admin/media': 'Médiathèque',

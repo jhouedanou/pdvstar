@@ -331,14 +331,16 @@ const publishEvent = async () => {
 
     isSubmitting.value = false
 
-    // Notifier l'admin si événement en attente de validation
+    // Notifier les admins si événement en attente de validation
     if (status === 'pending') {
-        const adminPhone = import.meta.env.VITE_ADMIN_PHONE || '+2250748348221'
-        const organizer = form.value.organizer || organizerName.value || userStore.user?.name || 'Organisateur inconnu'
-        const orgPhone = form.value.organizerPhone || userStore.user?.phone || 'N/A'
-        const eventTitle = form.value.title || 'Evenement sans titre'
-        const eventDate = form.value.date ? new Date(form.value.date).toLocaleString('fr-FR') : 'Non renseignee'
-        const message = `Nouvel evenement a valider
+        const adminPhonesRaw = import.meta.env.VITE_ADMIN_PHONES || import.meta.env.VITE_ADMIN_PHONE || ''
+        const adminPhones = adminPhonesRaw.split(',').map(p => p.trim()).filter(Boolean)
+        if (adminPhones.length) {
+            const organizer = form.value.organizer || organizerName.value || userStore.user?.name || 'Organisateur inconnu'
+            const orgPhone = form.value.organizerPhone || userStore.user?.phone || 'N/A'
+            const eventTitle = form.value.title || 'Evenement sans titre'
+            const eventDate = form.value.date ? new Date(form.value.date).toLocaleString('fr-FR') : 'Non renseignee'
+            const message = `Nouvel evenement a valider
 
 Titre : ${eventTitle}
 Organisateur : ${organizer}
@@ -347,7 +349,8 @@ Date : ${eventDate}
 Lieu : ${form.value.location || 'Non renseigne'}
 
 Connectez-vous sur /admin/dashboard pour moderer.`
-        sendWhatsAppMessage(adminPhone, message).catch(() => {})
+            adminPhones.forEach(p => sendWhatsAppMessage(p, message).catch(() => {}))
+        }
     }
 
     router.push('/organizer')
