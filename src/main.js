@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import './style.css'
 import App from './App.vue'
 import { checkAdminSession } from './stores/adminStore'
+import { SESSION_KEYS, USER_SESSION_DURATION_MS, readSession, writeSession } from './utils/sessionStorage'
 
 const FeedUser = () => import('./views/FeedUser.vue')
 const ProfilePage = () => import('./views/ProfilePage.vue')
@@ -58,18 +59,16 @@ const router = createRouter({
 
 // Lit le rôle du user en session
 const getSessionRole = () => {
-    const stored = localStorage.getItem('pdvstar_session_user')
-    if (!stored) return null
-    try {
-        const session = JSON.parse(stored)
-        if (session.user && session.expiry && Date.now() <= session.expiry) {
-            // Normalise role legacy 'user' -> 'consumer'
-            const r = session.user.role
-            if (r === 'user' || !r) return 'consumer'
-            return r
-        }
-    } catch (e) { /* ignore */ }
-    return null
+    const session = readSession(SESSION_KEYS.user)
+    if (!session?.user) return null
+
+    // Prolonge la session aussi lors des checks de navigation.
+    writeSession(SESSION_KEYS.user, session.user, USER_SESSION_DURATION_MS)
+
+    // Normalise role legacy 'user' -> 'consumer'
+    const r = session.user.role
+    if (r === 'user' || !r) return 'consumer'
+    return r
 }
 
 const hasRole = (allowed) => {

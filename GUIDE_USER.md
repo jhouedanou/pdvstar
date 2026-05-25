@@ -12,7 +12,7 @@ App Babi Vibes. Rôle par défaut. Aucun setup compte requis avant action.
    - Photo optionnelle
 4. Validation -> compte créé/retrouvé dans Supabase `users`, role = `consumer`.
 
-Session locale 7 jours, clé `pdvstar_session_user`. Reconnect auto si même device.
+Session locale 90 jours glissants, clé `pdvstar_session_user`. Reconnect auto si même device.
 
 ## Navigation principale
 
@@ -73,7 +73,7 @@ Modal demande permission à activation. OneSignal -> reçoit push sur :
 
 | Clé localStorage | Contenu | Durée |
 |---|---|---|
-| pdvstar_session_user | profil + role | 7j |
+| pdvstar_session_user | profil + role | 90j glissants |
 | pdvstar_active_pass_<id> | cache pass actif | selon pass |
 | last_phone_input | tel pré-rempli modal | persistant |
 | last_name_input | pseudo pré-rempli | persistant |

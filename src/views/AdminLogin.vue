@@ -5,6 +5,7 @@ import { Lock, Phone, Mail, LogIn, Loader2, ShieldCheck } from 'lucide-vue-next'
 import { supabase, findUserByEmail } from '../services/supabase'
 import { sendOtp, sendOtpEmail, verifyOtp } from '../services/otpService'
 import PhoneInput from '../components/PhoneInput.vue'
+import { ADMIN_SESSION_DURATION_MS, SESSION_KEYS, writeSession } from '../utils/sessionStorage'
 
 const router = useRouter()
 
@@ -100,10 +101,7 @@ const handleVerifyOtp = async () => {
       return
     }
 
-    localStorage.setItem('pdvstar_admin_session', JSON.stringify({
-      user: finalUser,
-      expiry: Date.now() + 8 * 60 * 60 * 1000
-    }))
+    writeSession(SESSION_KEYS.admin, finalUser, ADMIN_SESSION_DURATION_MS)
     router.push('/admin/dashboard')
   } finally {
     isLoading.value = false

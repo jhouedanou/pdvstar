@@ -1,21 +1,21 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '../services/supabase'
+import { ADMIN_SESSION_DURATION_MS, SESSION_KEYS, clearSession, readSession, writeSession } from '../utils/sessionStorage'
+
+const isAdminUser = (user) => user?.role === 'admin' || user?.role_v2 === 'admin'
 
 /**
  * Vérifie la session admin : token Supabase valide + role=admin dans public.users
  */
 export const checkAdminSession = async () => {
     // Check phone-based session first
-    try {
-        const stored = localStorage.getItem('pdvstar_admin_session')
-        if (stored) {
-            const s = JSON.parse(stored)
-            if (s.expiry > Date.now() && (s.user?.role === 'admin' || s.user?.role_v2 === 'admin')) {
-                return true
-            }
-        }
-    } catch {}
+    const storedSession = readSession(SESSION_KEYS.admin)
+    if (isAdminUser(storedSession?.user)) {
+        // Durée glissante : une session admin valide est prolongée à chaque contrôle.
+        writeSession(SESSION_KEYS.admin, storedSession.user, ADMIN_SESSION_DURATION_MS)
+        return true
+    }
 
     try {
         const { data: { session } } = await supabase.auth.getSession()
@@ -25,7 +25,7 @@ export const checkAdminSession = async () => {
             .select('role, role_v2')
             .eq('id', session.user.id)
             .single()
-        return data?.role === 'admin' || data?.role_v2 === 'admin'
+        return isAdminUser(data)
     } catch {
         return false
     }
@@ -36,14 +36,10 @@ export const useAdminStore = defineStore('admin', () => {
     const loginError = ref('')
 
     // Restaure session phone-based
-    const stored = localStorage.getItem('pdvstar_admin_session')
-    if (stored) {
-        try {
-            const s = JSON.parse(stored)
-            if (s.expiry > Date.now() && (s.user?.role === 'admin' || s.user?.role_v2 === 'admin')) {
-                isAuthenticated.value = true
-            }
-        } catch {}
+    const storedSession = readSession(SESSION_KEYS.admin)
+    if (isAdminUser(storedSession?.user)) {
+        isAuthenticated.value = true
+        writeSession(SESSION_KEYS.admin, storedSession.user, ADMIN_SESSION_DURATION_MS)
     }
 
     // Restaure la session Supabase Auth (legacy)
@@ -54,14 +50,14 @@ export const useAdminStore = defineStore('admin', () => {
             .select('role, role_v2')
             .eq('id', session.user.id)
             .single()
-        if (data?.role === 'admin' || data?.role_v2 === 'admin') {
+        if (isAdminUser(data)) {
             isAuthenticated.value = true
         }
     })
 
     supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || !session) {
-            const stored2 = localStorage.getItem('pdvstar_admin_session')
+            const stored2 = readSession(SESSION_KEYS.admin)
             if (!stored2) isAuthenticated.value = false
         }
     })
@@ -79,7 +75,7 @@ export const useAdminStore = defineStore('admin', () => {
             .select('role, role_v2')
             .eq('id', data.user.id)
             .single()
-        if (profile?.role !== 'admin' && profile?.role_v2 !== 'admin') {
+        if (!isAdminUser(profile)) {
             await supabase.auth.signOut()
             loginError.value = 'Accès refusé : compte non administrateur'
             return false
@@ -90,11 +86,10 @@ export const useAdminStore = defineStore('admin', () => {
 
     const logout = async () => {
         isAuthenticated.value = false
-        localStorage.removeItem('pdvstar_admin_session')
+        clearSession(SESSION_KEYS.admin)
         await supabase.auth.signOut()
     }
 
     return { isAuthenticated, loginError, login, logout }
 })
-
 

@@ -18,7 +18,7 @@ Chaque rôle accède à des écrans différents et persiste sa session dans `loc
 
 ### Session
 - Stockée dans `localStorage` clé `pdvstar_session_user`
-- Durée : 7 jours
+- Durée : 90 jours glissants (renouvelée à chaque ouverture/navigation)
 - Logique : `src/stores/userStore.js` → `authenticate()`
 
 ### Ce que peut faire un consumer
@@ -82,7 +82,7 @@ Définis dans `src/stores/adminStore.js:20-21` (à changer en prod via env var).
 
 ### Session
 - `localStorage` clé `pdvstar_admin_session`
-- Durée : 24 heures
+- Durée : 30 jours glissants (renouvelée à chaque contrôle admin)
 - **Indépendante** de la session user (`pdvstar_session_user`)
 - Possibilité d'avoir 2 sessions simultanées (admin + consumer)
 
@@ -152,8 +152,8 @@ WHERE phone = '+22507XXXXXXXX';
 
 | Clé | Rôle | Expire | Source |
 |---|---|---|---|
-| `pdvstar_session_user` | consumer / organizer | 7 jours | `userStore.authenticate()` |
-| `pdvstar_admin_session` | admin | 24 h | `adminStore.login()` |
+| `pdvstar_session_user` | consumer / organizer | 90 jours glissants | `userStore.authenticate()` |
+| `pdvstar_admin_session` | admin | 30 jours glissants | `AdminLogin.vue` / `adminStore` |
 | `pdvstar_active_pass_<userId>` | pass payant | selon pass | `userStore.buyPass()` |
 
 ---

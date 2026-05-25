@@ -11,21 +11,17 @@ import {
     PASS_CATALOG
 } from '../services/supabase'
 import { loginOneSignal, logoutOneSignal } from '../services/pushService'
+import { SESSION_KEYS, USER_SESSION_DURATION_MS, clearSession, readSession, writeSession } from '../utils/sessionStorage'
 
 export const useUserStore = defineStore('user', () => {
     // Load current session from localStorage (pointer to logged in user)
     const loadSession = () => {
-        const stored = localStorage.getItem('pdvstar_session_user')
-        if (stored) {
-            const session = JSON.parse(stored)
-            // Check expiry (7 Days)
-            if (session.expiry && Date.now() > session.expiry) {
-                localStorage.removeItem('pdvstar_session_user')
-                return null
-            }
-            return session.user
-        }
-        return null
+        const session = readSession(SESSION_KEYS.user)
+        if (!session) return null
+
+        // Durée glissante : une session valide est prolongée à chaque ouverture.
+        writeSession(SESSION_KEYS.user, session.user, USER_SESSION_DURATION_MS)
+        return session.user
     }
 
     const user = ref(loadSession())
@@ -214,12 +210,8 @@ export const useUserStore = defineStore('user', () => {
     }
 
     // Internal helper
-    const saveSession = () => {
-        const session = {
-            user: user.value,
-            expiry: Date.now() + (7 * 24 * 60 * 60 * 1000) // 1 Week
-        }
-        localStorage.setItem('pdvstar_session_user', JSON.stringify(session))
+    const saveSession = (sessionUser = user.value) => {
+        writeSession(SESSION_KEYS.user, sessionUser, USER_SESSION_DURATION_MS)
     }
 
     const updateProfile = async (updates) => {
@@ -234,13 +226,7 @@ export const useUserStore = defineStore('user', () => {
 
             if (updated) {
                 user.value = updated
-                const stored = localStorage.getItem('pdvstar_session_user')
-                const currentSession = stored ? JSON.parse(stored) : { expiry: Date.now() + (7 * 24 * 60 * 60 * 1000) }
-                const newSession = {
-                    ...currentSession,
-                    user: updated
-                }
-                localStorage.setItem('pdvstar_session_user', JSON.stringify(newSession))
+                saveSession(updated)
             }
         }
     }
@@ -273,7 +259,7 @@ export const useUserStore = defineStore('user', () => {
         user.value = null
         activePass.value = null
         passHistory.value = []
-        localStorage.removeItem('pdvstar_session_user')
+        clearSession(SESSION_KEYS.user)
         logoutOneSignal()
     }
 
