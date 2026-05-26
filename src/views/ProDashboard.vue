@@ -10,7 +10,7 @@ import {
   ArrowLeft, Plus, Edit, Trash2, Calendar, MapPin,
   Check, X, Loader2, Store, Megaphone, Clock,
   ShieldCheck, ShieldX, AlertTriangle, Ticket, Crown, ScanLine, Users, Phone, MessageCircle, LogOut,
-  Menu, Home, QrCode, LayoutDashboard, Bell, BellRing
+  Menu, Home, QrCode, LayoutDashboard, Bell, BellRing, Share2, Copy, MessageSquare
 } from 'lucide-vue-next'
 import { PASS_CATALOG } from '../services/supabase'
 import { fetchEventStats } from '../services/statsService'
@@ -302,6 +302,64 @@ const sendReminderForEvent = async (event) => {
     sendingReminderEventId.value = null
     setTimeout(() => { reminderStatus.value = '' }, 5000)
   }
+}
+
+// ============================
+// Partage event approuvé
+// ============================
+const shareStatus = ref({}) // { [eventId]: 'copied' | 'shared' | 'error' }
+
+const buildEventShareUrl = (event) => {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}/billet/${event.id}`
+}
+
+const buildEventShareText = (event) => {
+  const dateStr = event.date ? new Date(event.date).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : ''
+  const lieu = event.location ? ` à ${event.location}` : ''
+  const quand = dateStr ? ` le ${dateStr}` : ''
+  return `${event.title}${quand}${lieu}. Réserve ta place sur Babi Vibes :`
+}
+
+const setShareStatus = (eventId, status) => {
+  shareStatus.value = { ...shareStatus.value, [eventId]: status }
+  setTimeout(() => {
+    const next = { ...shareStatus.value }
+    delete next[eventId]
+    shareStatus.value = next
+  }, 2500)
+}
+
+const shareEventLink = async (event) => {
+  const url = buildEventShareUrl(event)
+  const text = buildEventShareText(event)
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: event.title, text, url })
+      setShareStatus(event.id, 'shared')
+    } else {
+      await navigator.clipboard.writeText(`${text} ${url}`)
+      setShareStatus(event.id, 'copied')
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return
+    setShareStatus(event.id, 'error')
+  }
+}
+
+const copyEventLink = async (event) => {
+  try {
+    await navigator.clipboard.writeText(buildEventShareUrl(event))
+    setShareStatus(event.id, 'copied')
+  } catch {
+    setShareStatus(event.id, 'error')
+  }
+}
+
+const shareEventWhatsApp = (event) => {
+  const url = buildEventShareUrl(event)
+  const text = `${buildEventShareText(event)} ${url}`
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener')
 }
 
 // ============================
@@ -659,6 +717,51 @@ const formatDate = (dateStr) => {
               </div>
               <div v-if="eventStats[event.id]?.revenue" class="text-xs text-green-400 mb-2">
                 {{ eventStats[event.id].revenue }} CFA - commission {{ eventStats[event.id].commission }}
+              </div>
+
+              <!-- Partage (event approuvé uniquement) -->
+              <div v-if="event.status === 'approved' || !event.status" class="mb-2">
+                <div class="bg-gray-900/60 border border-gray-800 rounded-lg p-2">
+                  <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <span class="text-[10px] text-gray-400 uppercase tracking-wide flex items-center gap-1">
+                      <Share2 class="w-3 h-3" /> Lien de partage
+                    </span>
+                    <span v-if="shareStatus[event.id] === 'copied'" class="text-[10px] text-green-400">Lien copié</span>
+                    <span v-else-if="shareStatus[event.id] === 'shared'" class="text-[10px] text-green-400">Partagé</span>
+                    <span v-else-if="shareStatus[event.id] === 'error'" class="text-[10px] text-red-400">Erreur</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 mb-1.5">
+                    <input
+                      :value="buildEventShareUrl(event)"
+                      readonly
+                      @focus="$event.target.select()"
+                      class="flex-1 bg-black/50 text-gray-300 text-[11px] px-2 py-1.5 rounded border border-gray-800 truncate"
+                    />
+                  </div>
+                  <div class="grid grid-cols-3 gap-1.5">
+                    <button
+                      @click="shareEventLink(event)"
+                      class="bg-primary/20 text-primary py-1.5 rounded text-[11px] font-medium hover:bg-primary/30 transition flex items-center justify-center gap-1"
+                      title="Partager"
+                    >
+                      <Share2 class="w-3 h-3" /> Partager
+                    </button>
+                    <button
+                      @click="copyEventLink(event)"
+                      class="bg-gray-800 text-gray-200 py-1.5 rounded text-[11px] font-medium hover:bg-gray-700 transition flex items-center justify-center gap-1"
+                      title="Copier le lien"
+                    >
+                      <Copy class="w-3 h-3" /> Copier
+                    </button>
+                    <button
+                      @click="shareEventWhatsApp(event)"
+                      class="bg-green-500/20 text-green-400 py-1.5 rounded text-[11px] font-medium hover:bg-green-500/30 transition flex items-center justify-center gap-1"
+                      title="Partager via WhatsApp"
+                    >
+                      <MessageSquare class="w-3 h-3" /> WhatsApp
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <!-- Actions secondaires -->
