@@ -58,12 +58,21 @@ export const sendWhatsAppMessage = async (phoneNumber, message) => {
         })
     })
 
-    if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(`GreenAPI Error: ${errorData.message || response.statusText}`)
+    const rawBody = await response.text()
+    let data = null
+    if (rawBody) {
+        try { data = JSON.parse(rawBody) } catch { /* non-JSON body */ }
     }
 
-    const data = await response.json()
+    if (!response.ok) {
+        const detail = data?.message || rawBody || response.statusText || `HTTP ${response.status}`
+        throw new Error(`GreenAPI Error: ${detail}`)
+    }
+
+    if (!data) {
+        throw new Error(`GreenAPI Error: réponse vide (HTTP ${response.status})`)
+    }
+
     return {
         success: true,
         messageId: data.idMessage,
